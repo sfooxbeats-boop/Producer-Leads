@@ -1,10 +1,15 @@
 import { KEYWORDS, MATCH_TAGS } from './keywords';
+import { MOCK_LEADS } from './mockLeads';
 
 const THREADS_BASE = 'https://graph.threads.net/v1.0';
 
 // This is YOUR personal Threads access token (you add it to .env).
 // It allows the app to search all public Threads posts.
 const ACCESS_TOKEN = process.env.EXPO_PUBLIC_THREADS_ACCESS_TOKEN;
+
+// Whether a real Threads token is available
+export const HAS_THREADS_TOKEN =
+  !!ACCESS_TOKEN && ACCESS_TOKEN !== 'YOUR_THREADS_TOKEN_HERE';
 
 export type ThreadsPost = {
   id: string;
@@ -45,7 +50,15 @@ async function searchByKeyword(keyword: string): Promise<any[]> {
 
 // Fetch leads for all of the user's selected categories.
 // Searches all relevant keywords, deduplicates, and sorts by newest first.
+// If no Threads token is configured, returns mock data so the UI still works.
 export async function fetchLeadsForCategories(categories: string[]): Promise<ThreadsPost[]> {
+  if (!HAS_THREADS_TOKEN) {
+    // Filter mock data based on categories the user picked
+    const tags = new Set(categories.map(c => MATCH_TAGS[c]).filter(Boolean));
+    const filtered = MOCK_LEADS.filter(lead => tags.has(lead.match_tag));
+    return filtered.length > 0 ? filtered : MOCK_LEADS;
+  }
+
   const seenIds = new Set<string>();
   const results: ThreadsPost[] = [];
 

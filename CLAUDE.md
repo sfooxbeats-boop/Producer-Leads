@@ -124,12 +124,31 @@ Two tables — created via Supabase Management API. SQL is in [SETUP_GUIDE.md](S
 - ✅ Project skeleton scaffolded, all packages installed
 - ✅ Supabase URL + anon key configured in `.env`
 - ✅ Supabase `users` + `leads` tables created with RLS policies
+- ✅ Supabase `mailer_autoconfirm = true` (email signup skips confirmation)
 - ✅ All screens built and styled (sign-in, onboarding, dashboard, settings)
 - ✅ Code pushed to GitHub: https://github.com/sfooxbeats-boop/Producer-Leads
-- ✅ App runs on Expo Go (sign-in screen visible)
+- ✅ App runs on Expo Go
+- ✅ **Dev mode active** — auth + onboarding bypassed; app opens straight to dashboard
+- ✅ **Mock leads data** — dashboard shows realistic sample posts when no Threads token
 - ⏳ **Google OAuth** — not yet configured in Google Cloud Console / Supabase Auth
 - ⏳ **Threads API token** — Meta Developer app not yet created
 - ⏳ **Meta App Review** — required before public users can use the app (2–4 weeks)
+
+## Dev Mode (Auth Bypass)
+
+To get the app running on a phone without setting up Google/Threads first, auth was bypassed:
+
+- [app/index.tsx](app/index.tsx) — `<Redirect href="/(app)/dashboard" />`
+- [app/_layout.tsx](app/_layout.tsx) — no auth gate, just renders Stack
+- [app/(app)/dashboard.tsx](app/(app)/dashboard.tsx) — uses hardcoded `DEFAULT_CATEGORIES` instead of Supabase profile
+- [app/(app)/settings.tsx](app/(app)/settings.tsx) — placeholder, no profile editing
+- [lib/threads.ts](lib/threads.ts) — falls back to [lib/mockLeads.ts](lib/mockLeads.ts) when `HAS_THREADS_TOKEN` is false
+
+**To re-enable auth flow:**
+1. Restore `app/index.tsx` to the session-checking version (see git history)
+2. Restore `app/_layout.tsx` redirect logic
+3. Restore `app/(app)/dashboard.tsx` to fetch user profile from Supabase
+4. Restore `app/(app)/settings.tsx` full version with profile editing
 
 ## User Preferences (from past conversations)
 
