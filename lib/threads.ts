@@ -80,8 +80,8 @@ export async function fetchLeadsForCategories(categories: string[]): Promise<Thr
               username: post.username,
               permalink: post.permalink ?? '',
               match_tag: tag,
-              // Threads username = Instagram username (they share the same account)
-              threads_url: `https://www.threads.net/@${post.username}`,
+              // Use the actual post permalink so "View Post" opens the exact post
+              threads_url: post.permalink || `https://www.threads.net/@${post.username}`,
               instagram_url: `https://www.instagram.com/${post.username}`,
             });
           }
@@ -90,6 +90,16 @@ export async function fetchLeadsForCategories(categories: string[]): Promise<Thr
         console.error(`Failed to search "${keyword}":`, err);
       }
     }
+  }
+
+  // In Meta dev mode, keyword search only returns posts from connected accounts.
+  // Fall back to mock data padded with real results until App Review passes.
+  if (results.length < 5) {
+    const tags = new Set(categories.map(c => MATCH_TAGS[c]).filter(Boolean));
+    const mocks = MOCK_LEADS.filter(l => tags.has(l.match_tag));
+    const combined = [...results, ...mocks];
+    const seen = new Set<string>();
+    return combined.filter(p => seen.has(p.id) ? false : (seen.add(p.id), true));
   }
 
   // Sort newest first

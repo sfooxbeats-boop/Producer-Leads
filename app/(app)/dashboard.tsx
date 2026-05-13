@@ -73,15 +73,17 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Mock data banner */}
-        {!HAS_THREADS_TOKEN && (
-          <View className="mt-4 bg-accent/10 border border-accent rounded-2xl px-4 py-3">
-            <Text className="text-accent text-xs font-semibold mb-1">DEMO MODE</Text>
-            <Text className="text-white text-xs leading-5">
-              Showing sample leads. Add a Threads API token to .env to fetch real posts.
-            </Text>
-          </View>
-        )}
+        {/* Status banner */}
+        <View className="mt-4 bg-accent/10 border border-accent rounded-2xl px-4 py-3">
+          <Text className="text-accent text-xs font-semibold mb-1">
+            {HAS_THREADS_TOKEN ? 'DEV MODE — APP REVIEW PENDING' : 'DEMO MODE'}
+          </Text>
+          <Text className="text-white text-xs leading-5">
+            {HAS_THREADS_TOKEN
+              ? 'Threads API connected ✓ — showing sample leads until Meta App Review passes, which unlocks real public posts.'
+              : 'Add a Threads API token to .env to connect to real Threads data.'}
+          </Text>
+        </View>
 
         {/* Stats bar */}
         <View className="mt-4 bg-card rounded-2xl px-5 py-4 border border-border flex-row items-center justify-between">
