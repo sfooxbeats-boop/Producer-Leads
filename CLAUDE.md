@@ -131,7 +131,7 @@ Two tables — created via Supabase Management API. SQL is in [SETUP_GUIDE.md](S
 - ✅ **Dev mode active** — auth + onboarding bypassed; app opens straight to dashboard
 - ✅ **Mock leads data** — dashboard shows realistic sample posts when no Threads token
 - ⏳ **Google OAuth** — not yet configured in Google Cloud Console / Supabase Auth
-- ⏳ **Threads API token** — Meta Developer app not yet created
+- ✅ **Threads API token** — Working 60-day token in `.env`. Meta app: Producer Leads (Threads App ID: 2830179424008862). Token expires ~July 2026. Use `node exchange-code.js` to renew.
 - ⏳ **Meta App Review** — required before public users can use the app (2–4 weeks)
 
 ## Dev Mode (Auth Bypass)
