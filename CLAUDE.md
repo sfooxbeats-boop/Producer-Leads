@@ -24,13 +24,14 @@ Owner: sfooxbeats (sfooxbeats@gmail.com) — **complete beginner** in app develo
 
 ```
 app/                    # Screens (file-based routing)
-  index.tsx             # Entry — redirects based on auth state
-  _layout.tsx           # Root layout, watches auth state
+  index.tsx             # Entry — DEV MODE: redirects straight to dashboard
+  _layout.tsx           # Root layout — DEV MODE: no auth gate, just renders Stack
   (auth)/sign-in.tsx    # Google sign in (handles web + Expo Go native flows)
   (app)/dashboard.tsx   # Main leads screen
-  (app)/settings.tsx    # Edit profile / sign out
-  onboarding.tsx        # 3-step profile setup
+  (app)/settings.tsx    # DEV MODE: placeholder settings, no profile editing
+  onboarding.tsx        # 3-step profile setup (bypassed in dev mode)
   auth/callback.tsx     # OAuth redirect handler
+  privacy.tsx           # Privacy policy page (required for Meta App Review)
 
 components/
   LeadCard.tsx          # Individual lead post card
@@ -38,8 +39,11 @@ components/
 lib/
   supabase.ts           # Supabase client + auth helpers + profile helpers
   threads.ts            # Threads API keyword search + lead aggregation
+  mockLeads.ts          # Sample leads shown when real API returns < 5 posts
   keywords.ts           # Keyword lists per producer category
 
+get-threads-token.js    # Full OAuth flow to get Threads token (one-time setup)
+exchange-code.js        # Exchange auth code for long-lived token (use to renew)
 babel.config.js         # NativeWind v4 preset config (see Gotchas)
 metro.config.js         # withNativeWind wrapper
 tailwind.config.js      # Custom dark color palette
@@ -124,15 +128,17 @@ Two tables — created via Supabase Management API. SQL is in [SETUP_GUIDE.md](S
 - ✅ Project skeleton scaffolded, all packages installed
 - ✅ Supabase URL + anon key configured in `.env`
 - ✅ Supabase `users` + `leads` tables created with RLS policies
-- ✅ Supabase `mailer_autoconfirm = true` (email signup skips confirmation)
 - ✅ All screens built and styled (sign-in, onboarding, dashboard, settings)
 - ✅ Code pushed to GitHub: https://github.com/sfooxbeats-boop/Producer-Leads
 - ✅ App runs on Expo Go
 - ✅ **Dev mode active** — auth + onboarding bypassed; app opens straight to dashboard
-- ✅ **Mock leads data** — dashboard shows realistic sample posts when no Threads token
+- ✅ **Mock leads data** — dashboard shows realistic sample posts when real API returns < 5 posts
+- ✅ **Threads API connected** — keyword search working. Token expires ~July 2026. Renew with `node exchange-code.js`
+- ✅ **View Post fixed** — uses `permalink` from API so button opens the exact post
+- ✅ **Privacy policy page** — lives at `/privacy` in the app (needed for Meta App Review)
 - ⏳ **Google OAuth** — not yet configured in Google Cloud Console / Supabase Auth
-- ✅ **Threads API token** — Working 60-day token in `.env`. Meta app: Producer Leads (Threads App ID: 2830179424008862). Token expires ~July 2026. Use `node exchange-code.js` to renew.
 - ⏳ **Meta App Review** — required before public users can use the app (2–4 weeks)
+- ⏳ **App deployed to Vercel** — needed to provide a live URL for App Review submission
 
 ## Dev Mode (Auth Bypass)
 
@@ -142,13 +148,28 @@ To get the app running on a phone without setting up Google/Threads first, auth 
 - [app/_layout.tsx](app/_layout.tsx) — no auth gate, just renders Stack
 - [app/(app)/dashboard.tsx](app/(app)/dashboard.tsx) — uses hardcoded `DEFAULT_CATEGORIES` instead of Supabase profile
 - [app/(app)/settings.tsx](app/(app)/settings.tsx) — placeholder, no profile editing
-- [lib/threads.ts](lib/threads.ts) — falls back to [lib/mockLeads.ts](lib/mockLeads.ts) when `HAS_THREADS_TOKEN` is false
+- [lib/threads.ts](lib/threads.ts) — falls back to [lib/mockLeads.ts](lib/mockLeads.ts) when real API returns < 5 posts
 
 **To re-enable auth flow:**
 1. Restore `app/index.tsx` to the session-checking version (see git history)
 2. Restore `app/_layout.tsx` redirect logic
 3. Restore `app/(app)/dashboard.tsx` to fetch user profile from Supabase
 4. Restore `app/(app)/settings.tsx` full version with profile editing
+
+## Meta App Review Checklist
+
+Required before the app can be used by the public:
+
+- [ ] Privacy Policy URL — page lives at `/privacy`, needs Vercel deploy for public URL
+- [ ] App deployed to Vercel — provides the live URL reviewers need to test
+- [ ] App icon uploaded in Meta developer dashboard (1024×1024)
+- [ ] Screencast video — record the full flow: sign in → onboarding → dashboard → view post
+- [ ] Submit `threads_basic` permission for review
+- [ ] Submit `threads_keyword_search` permission for review
+- [ ] Tech Provider verification (may be required for `threads_keyword_search`)
+
+Meta App ID: `1844958776415693`
+Threads App ID: `2830179424008862`
 
 ## User Preferences (from past conversations)
 
