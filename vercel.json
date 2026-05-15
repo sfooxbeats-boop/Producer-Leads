@@ -3,8 +3,8 @@
   "installCommand": "",
   "outputDirectory": "dist",
   "framework": null,
-  "routes": [
-    { "src": "/privacy", "dest": "/privacy.html" },
-    { "src": "/(.*)", "dest": "/index.html" }
+  "rewrites": [
+    { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
