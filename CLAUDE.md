@@ -144,10 +144,14 @@ Two tables — created via Supabase Management API. SQL is in [SETUP_GUIDE.md](S
 - ✅ **App icon** — uploaded to Meta developer dashboard (1024×1024)
 - ✅ **Screencast video** — recorded showing dashboard → filter → Instagram → View Post
 - ✅ **Dev mode banner removed** — dashboard looks clean for Meta reviewers
+- ✅ **loopgem.com domain verified** — confirmed in Meta business verification
+- ✅ **Meta App Review submission filled** — allowed usage descriptions, data handling, reviewer instructions, and platform (website) all completed
+- ✅ **Data processors declared** — Supabase + Vercel listed as IT solutions/cloud providers (United States)
+- ✅ **Reviewer instructions written** — includes URL, no-login walkthrough, and clarification that Facebook Login is NOT used
 - ⏳ **Google OAuth** — not yet configured in Google Cloud Console / Supabase Auth
-- ⏳ **Meta Business Verification** — in progress. Using Sole Proprietorship + loopgem.com domain email. Old auto-entrepreneur card (expired 29/11/2021, registration deleted) may need re-registration at autoentrepreneur.ma
-- ⏳ **Meta App Review** — blocked on business verification. `threads_basic` + `threads_keyword_search` ready to submit once verified
-- ⏳ **Permissions submitted** — not yet. Waiting for business verification to complete
+- ⏳ **Meta Business Verification** — under review. Auto-entrepreneur registration submitted. Using Sole Proprietorship + loopgem.com domain.
+- ⏳ **Meta App Review** — submission in progress. Waiting for business verification to clear before final submit.
+- ⏳ **Screencast upload** — needs to be uploaded in the Allowed Usage section for both permissions, and in Reviewer Instructions supporting docs
 
 ## Dev Mode (Auth Bypass)
 
@@ -175,9 +179,14 @@ Required before the app can be used by the public:
 - [x] Screencast video — recorded (dashboard → filters → Instagram → View Post)
 - [x] App domains — `producer-leads.vercel.app` added in Meta Basic Settings
 - [x] Data deletion URL — filled in Meta Basic Settings
-- [ ] **Business verification** — CURRENT BLOCKER. Sole Proprietorship selected. Need valid document + loopgem.com business email. Old auto-entrepreneur card expired (29/11/2021) + registration deleted. May need to re-register at autoentrepreneur.ma
-- [ ] Submit `threads_basic` permission for review
-- [ ] Submit `threads_keyword_search` permission for review
+- [x] Website platform added — `https://producer-leads.vercel.app` in Meta Basic Settings
+- [x] Allowed usage descriptions filled for both `threads_basic` and `threads_keyword_search`
+- [x] Data handling section completed — data processors (Supabase, Vercel), data controller (Soufyane Remdane), country (Morocco)
+- [x] Reviewer instructions written — URL, no-login walkthrough, no Facebook Login clarification
+- [ ] **Business verification** — under review. Auto-entrepreneur submitted. loopgem.com domain verified.
+- [ ] Upload screencast in Allowed Usage section (for both permissions) and in Reviewer Instructions docs
+- [ ] Submit `threads_basic` permission for review (once business verification clears)
+- [ ] Submit `threads_keyword_search` permission for review (once business verification clears)
 
 Meta App ID: `1844958776415693`
 Threads App ID: `2830179424008862`
