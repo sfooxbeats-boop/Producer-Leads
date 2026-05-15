@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'expo-router';
-import { fetchLeadsForCategories, HAS_THREADS_TOKEN, type ThreadsPost } from '../../lib/threads';
+import { fetchLeadsForCategories, type ThreadsPost } from '../../lib/threads';
 import { CATEGORY_LABELS, type Category } from '../../lib/keywords';
 import LeadCard from '../../components/LeadCard';
 
@@ -71,18 +71,6 @@ export default function DashboardScreen() {
           >
             <Text className="text-lg">⚙️</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* Status banner */}
-        <View className="mt-4 bg-accent/10 border border-accent rounded-2xl px-4 py-3">
-          <Text className="text-accent text-xs font-semibold mb-1">
-            {HAS_THREADS_TOKEN ? 'DEV MODE — APP REVIEW PENDING' : 'DEMO MODE'}
-          </Text>
-          <Text className="text-white text-xs leading-5">
-            {HAS_THREADS_TOKEN
-              ? 'Threads API connected ✓ — showing sample leads until Meta App Review passes, which unlocks real public posts.'
-              : 'Add a Threads API token to .env to connect to real Threads data.'}
-          </Text>
         </View>
 
         {/* Stats bar */}
