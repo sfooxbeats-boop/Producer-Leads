@@ -1,7 +1,5 @@
 {
-  "buildCommand": "npx expo export --platform web && cp privacy.html dist/privacy.html",
   "outputDirectory": "dist",
-  "installCommand": "npm install --legacy-peer-deps",
   "routes": [
     { "src": "/privacy", "dest": "/privacy.html" },
     { "src": "/(.*)", "dest": "/index.html" }
