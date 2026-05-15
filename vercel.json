@@ -1,5 +1,8 @@
 {
+  "buildCommand": "",
+  "installCommand": "",
   "outputDirectory": "dist",
+  "framework": null,
   "routes": [
     { "src": "/privacy", "dest": "/privacy.html" },
     { "src": "/(.*)", "dest": "/index.html" }
