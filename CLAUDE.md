@@ -48,6 +48,8 @@ babel.config.js         # NativeWind v4 preset config (see Gotchas)
 metro.config.js         # withNativeWind wrapper
 tailwind.config.js      # Custom dark color palette
 global.css              # Tailwind base + components + utilities
+privacy.html            # Static HTML privacy policy (served by Vercel + GitHub Pages for Meta)
+vercel.json             # Vercel deployment config — build command, output dir, SPA routes
 .env                    # Supabase + Threads credentials (gitignored)
 .env.example            # Template — safe to commit
 .npmrc                  # legacy-peer-deps=true (required for Expo Router peer conflicts)
@@ -135,10 +137,17 @@ Two tables — created via Supabase Management API. SQL is in [SETUP_GUIDE.md](S
 - ✅ **Mock leads data** — dashboard shows realistic sample posts when real API returns < 5 posts
 - ✅ **Threads API connected** — keyword search working. Token expires ~July 2026. Renew with `node exchange-code.js`
 - ✅ **View Post fixed** — uses `permalink` from API so button opens the exact post
-- ✅ **Privacy policy page** — lives at `/privacy` in the app (needed for Meta App Review)
+- ✅ **Privacy policy page** — lives at `/privacy` in the app + static `privacy.html` at root
+- ✅ **App deployed to Vercel** — live at https://producer-leads.vercel.app
+- ✅ **Privacy policy URL** — https://producer-leads.vercel.app/privacy (served as static HTML)
+- ✅ **GitHub Pages enabled** — https://sfooxbeats-boop.github.io/Producer-Leads/privacy.html
+- ✅ **App icon** — uploaded to Meta developer dashboard (1024×1024)
+- ✅ **Screencast video** — recorded showing dashboard → filter → Instagram → View Post
+- ✅ **Dev mode banner removed** — dashboard looks clean for Meta reviewers
 - ⏳ **Google OAuth** — not yet configured in Google Cloud Console / Supabase Auth
-- ⏳ **Meta App Review** — required before public users can use the app (2–4 weeks)
-- ⏳ **App deployed to Vercel** — needed to provide a live URL for App Review submission
+- ⏳ **Meta Business Verification** — in progress. Using Sole Proprietorship + loopgem.com domain email. Old auto-entrepreneur card (expired 29/11/2021, registration deleted) may need re-registration at autoentrepreneur.ma
+- ⏳ **Meta App Review** — blocked on business verification. `threads_basic` + `threads_keyword_search` ready to submit once verified
+- ⏳ **Permissions submitted** — not yet. Waiting for business verification to complete
 
 ## Dev Mode (Auth Bypass)
 
@@ -160,13 +169,15 @@ To get the app running on a phone without setting up Google/Threads first, auth 
 
 Required before the app can be used by the public:
 
-- [ ] Privacy Policy URL — page lives at `/privacy`, needs Vercel deploy for public URL
-- [ ] App deployed to Vercel — provides the live URL reviewers need to test
-- [ ] App icon uploaded in Meta developer dashboard (1024×1024)
-- [ ] Screencast video — record the full flow: sign in → onboarding → dashboard → view post
+- [x] Privacy Policy URL — https://producer-leads.vercel.app/privacy
+- [x] App deployed to Vercel — https://producer-leads.vercel.app
+- [x] App icon uploaded in Meta developer dashboard (1024×1024)
+- [x] Screencast video — recorded (dashboard → filters → Instagram → View Post)
+- [x] App domains — `producer-leads.vercel.app` added in Meta Basic Settings
+- [x] Data deletion URL — filled in Meta Basic Settings
+- [ ] **Business verification** — CURRENT BLOCKER. Sole Proprietorship selected. Need valid document + loopgem.com business email. Old auto-entrepreneur card expired (29/11/2021) + registration deleted. May need to re-register at autoentrepreneur.ma
 - [ ] Submit `threads_basic` permission for review
 - [ ] Submit `threads_keyword_search` permission for review
-- [ ] Tech Provider verification (may be required for `threads_keyword_search`)
 
 Meta App ID: `1844958776415693`
 Threads App ID: `2830179424008862`
@@ -182,4 +193,8 @@ Threads App ID: `2830179424008862`
 - [SETUP_GUIDE.md](SETUP_GUIDE.md) — owner-facing setup walkthrough
 - Supabase project: https://supabase.com/dashboard/project/hylrkrfmxsnocauibqnt
 - GitHub repo: https://github.com/sfooxbeats-boop/Producer-Leads
+- Vercel deployment: https://producer-leads.vercel.app
+- GitHub Pages privacy URL: https://sfooxbeats-boop.github.io/Producer-Leads/privacy.html
 - Threads API docs: https://developers.facebook.com/docs/threads/keyword-search/
+- Morocco auto-entrepreneur registration: https://autoentrepreneur.ma
+- Owner also has domain `loopgem.com` with pro email (needs reactivation) — use for Meta business verification
