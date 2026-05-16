@@ -125,6 +125,11 @@ Two tables — created via Supabase Management API. SQL is in [SETUP_GUIDE.md](S
 
 7. **Threads access token expires every 60 days** — set a reminder. Refresh via Meta Graph API Explorer.
 
+8. **Vercel blank page** — Two causes fixed:
+   - `routes[]` in vercel.json intercepts ALL requests including `/_expo/static/js` and CSS files. Use `rewrites[]` instead — it only applies when no real file exists, so JS/CSS load correctly.
+   - `EXPO_PUBLIC_*` env vars are baked into the bundle at build time. Vercel was rebuilding without them (no `.env` on their server). Fix: build locally with `npx expo export --platform web`, commit the `dist/` folder, and set `"buildCommand": ""` in vercel.json so Vercel just serves the pre-built files.
+   - **When you make code changes:** run `npx expo export --platform web && cp privacy.html dist/privacy.html`, then commit and push.
+
 ## Current Status
 
 - ✅ Project skeleton scaffolded, all packages installed
@@ -138,7 +143,7 @@ Two tables — created via Supabase Management API. SQL is in [SETUP_GUIDE.md](S
 - ✅ **Threads API connected** — keyword search working. Token expires ~July 2026. Renew with `node exchange-code.js`
 - ✅ **View Post fixed** — uses `permalink` from API so button opens the exact post
 - ✅ **Privacy policy page** — lives at `/privacy` in the app + static `privacy.html` at root
-- ✅ **App deployed to Vercel** — live at https://producer-leads.vercel.app
+- ✅ **App deployed to Vercel** — live at https://producer-leads.vercel.app (blank page bug fixed — see Gotchas #8)
 - ✅ **Privacy policy URL** — https://producer-leads.vercel.app/privacy (served as static HTML)
 - ✅ **GitHub Pages enabled** — https://sfooxbeats-boop.github.io/Producer-Leads/privacy.html
 - ✅ **App icon** — uploaded to Meta developer dashboard (1024×1024)
