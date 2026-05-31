@@ -4,211 +4,248 @@ This file gives Claude (or any developer) the context needed to work on this cod
 
 ## What this app is
 
-**Producer Leads** is a mobile + web app that helps music producers, beatmakers, and sound engineers find potential clients. It searches Threads (Meta's social app) for public posts where people ask for music services (beats, mixing, production), and shows them on a dashboard with the author's Threads + Instagram links.
+**Producer Leads** is a system that finds music producers' potential clients on social media and delivers them to Telegram every morning.
+
+The architecture changed on 2026-05-31 — Meta business verification was denied, so the app no longer uses the official Threads API. Instead it uses **Apify** to scrape public posts, sends them through a **Supabase Edge Function** which filters and dedupes, then forwards qualifying leads to a **Telegram bot** with quick-action buttons (DM on Instagram, View Post). The Expo web/mobile dashboard still exists as a backup view but Telegram is the primary interface now.
+
+Two audience types are targeted:
+1. **Artists looking for producers/beats/mixing/mastering** — original audience
+2. **Producers struggling to sell beats** — added 2026-05-31 because the owner's new website helps producers grow beat sales
 
 Owner: sfooxbeats (sfooxbeats@gmail.com) — **complete beginner** in app development. Explanations should be plain-language and detailed.
 
 ## Tech Stack
 
-| Layer | Tool | Version |
-|-------|------|---------|
-| Framework | Expo (React Native) | SDK 54 |
-| Language | TypeScript | 5.9 |
-| Routing | Expo Router (file-based) | 6.x |
-| Styling | NativeWind v4 + Tailwind CSS 3 | 4.2.3 / 3.4 |
-| Auth + DB | Supabase | latest |
-| External API | Meta Threads API | v1.0 |
-| Native arch | New Architecture enabled | yes |
+| Layer | Tool | Notes |
+|-------|------|-------|
+| Lead scraping | **Apify** (Actor `automation-lab/threads-scraper`) | Daily cron, pay-per-event |
+| Lead ingestion | **Supabase Edge Function** (`ingest-leads`) | Filters 48h + music-relevance, dedupes, fires Telegram |
+| Notifications | **Telegram Bot** (@ProducerLeadsbot) | Inline keyboard buttons for Instagram + post URL |
+| Frontend | Expo (React Native) SDK 54 + Expo Router 6 | Dashboard reads leads from Supabase |
+| Styling | NativeWind v4 + Tailwind CSS 3 | |
+| Auth + DB | Supabase | |
+| Hosting | Vercel (web) | |
 
 ## Folder Structure
 
 ```
 app/                    # Screens (file-based routing)
-  index.tsx             # Entry — DEV MODE: redirects straight to dashboard
-  _layout.tsx           # Root layout — DEV MODE: no auth gate, just renders Stack
-  (auth)/sign-in.tsx    # Google sign in (handles web + Expo Go native flows)
-  (app)/dashboard.tsx   # Main leads screen
-  (app)/settings.tsx    # DEV MODE: placeholder settings, no profile editing
-  onboarding.tsx        # 3-step profile setup (bypassed in dev mode)
+  index.tsx             # Entry — DEV MODE: redirects to dashboard
+  _layout.tsx           # Root layout — DEV MODE: no auth gate
+  (auth)/sign-in.tsx    # Google sign in
+  (app)/dashboard.tsx   # Reads leads from Supabase (filtered by platform)
+  (app)/settings.tsx    # Placeholder in dev mode
+  onboarding.tsx        # Bypassed in dev mode
   auth/callback.tsx     # OAuth redirect handler
-  privacy.tsx           # Privacy policy page (required for Meta App Review)
+  privacy.tsx           # Privacy policy page (legacy from Meta App Review)
 
 components/
-  LeadCard.tsx          # Individual lead post card
+  LeadCard.tsx          # Renders a single lead — platform badge, email, IG + post buttons
 
 lib/
-  supabase.ts           # Supabase client + auth helpers + profile helpers
-  threads.ts            # Threads API keyword search + lead aggregation
-  mockLeads.ts          # Sample leads shown when real API returns < 5 posts
-  keywords.ts           # Keyword lists per producer category
+  supabase.ts           # Supabase client + auth helpers
+  threads.ts            # Now mostly defines the Lead type + fetchLeadsFromDatabase()
+  mockLeads.ts          # Legacy mock data
+  keywords.ts           # Legacy keyword lists (no longer used at runtime)
 
-get-threads-token.js    # Full OAuth flow to get Threads token (one-time setup)
-exchange-code.js        # Exchange auth code for long-lived token (use to renew)
-babel.config.js         # NativeWind v4 preset config (see Gotchas)
-metro.config.js         # withNativeWind wrapper
-tailwind.config.js      # Custom dark color palette
-global.css              # Tailwind base + components + utilities
-privacy.html            # Static HTML privacy policy (served by Vercel + GitHub Pages for Meta)
-vercel.json             # Vercel deployment config — build command, output dir, SPA routes
-.env                    # Supabase + Threads credentials (gitignored)
-.env.example            # Template — safe to commit
-.npmrc                  # legacy-peer-deps=true (required for Expo Router peer conflicts)
-SETUP_GUIDE.md          # Step-by-step setup instructions for the owner
+supabase/
+  functions/
+    ingest-leads/
+      index.ts          # Edge Function — webhook target for Apify, sends to Telegram
+  migrations/
+    recreate_leads.sql  # SQL for the rebuilt leads table
+
+privacy.html            # Static privacy policy (legacy from Meta App Review)
+vercel.json             # Vercel SPA config
+.env                    # Supabase + (legacy) Threads credentials — gitignored
 ```
 
 ## Environment Variables
 
-All public vars MUST be prefixed `EXPO_PUBLIC_` for Expo to expose them:
-
+App-side (Expo, prefixed `EXPO_PUBLIC_`):
 ```
 EXPO_PUBLIC_SUPABASE_URL=https://hylrkrfmxsnocauibqnt.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJxxx...
-EXPO_PUBLIC_THREADS_ACCESS_TOKEN=...     # 60-day rolling token
 ```
 
-## Common Commands
-
-```bash
-# Start dev server (for Expo Go on phone or web)
-npx expo start
-npx expo start --clear        # when caches go stale (most common fix)
-npx expo start --tunnel       # if phone is on different WiFi
-
-# Web only
-npm run web
-
-# Install a new package (USE THIS, not plain npm install)
-npx expo install <package>    # picks SDK-compatible version automatically
-
-# Production build (later, not yet)
-npx eas build --platform ios
-npx eas build --platform android
+Edge Function secrets (set via `supabase secrets set`, never in code):
+```
+TELEGRAM_BOT_TOKEN     # Producer Leads bot
+TELEGRAM_CHAT_ID       # Owner's personal chat ID (7813158930)
+APIFY_API_TOKEN        # Used to fetch dataset items from Apify
+SUPABASE_SERVICE_ROLE_KEY  # Auto-injected by Supabase
+SUPABASE_URL               # Auto-injected by Supabase
 ```
 
 ## Database Schema (Supabase)
 
-Two tables — created via Supabase Management API. SQL is in [SETUP_GUIDE.md](SETUP_GUIDE.md).
+- `users` — producer profiles (legacy from auth flow). RLS: users read/write their own row.
+- `leads` — **rebuilt 2026-05-31**. Stores every lead scraped from Apify.
 
-- `users` — producer profiles. RLS: users can only read/write their own row.
-- `leads` — cached Threads posts (currently unused at runtime; dashboard hits Threads API directly).
+```sql
+CREATE TABLE leads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id TEXT UNIQUE NOT NULL,         -- e.g. "threads_3908721974410631605"
+  platform TEXT NOT NULL DEFAULT 'threads',
+  username TEXT NOT NULL,
+  post_text TEXT NOT NULL,
+  post_url TEXT NOT NULL,
+  instagram_url TEXT NOT NULL,
+  email TEXT,                            -- extracted from post text or bio
+  match_tag TEXT,
+  posted_at TIMESTAMPTZ,
+  fetched_at TIMESTAMPTZ DEFAULT now()
+);
+```
 
-## Key Conventions
+`post_id` uniqueness drives dedup — if a lead with the same `post_id` is already in the DB, the Edge Function skips Telegram (no duplicate notifications).
 
-- **Color palette** — dark theme. `bg #0A0A0A`, `card #1A1A1A`, `border #2A2A2A`, `accent #8B5CF6` (purple), `muted #6B7280`. Defined in tailwind.config.js.
-- **TypeScript** — strict on. No `any` if avoidable.
-- **No comments unless WHY is non-obvious** — see global guidance.
-- **Threads username = Instagram username** — they share an account. Safe to link both directly.
+## How the daily flow works
+
+```
+6:00 AM Africa/Casablanca — Apify schedule fires
+  ↓
+Apify runs `automation-lab/threads-scraper` task with 12 music keywords
+  ↓
+On success → webhook hits Supabase Edge Function `ingest-leads`
+  ↓
+Edge Function:
+  1. Fetches dataset items from Apify using APIFY_API_TOKEN
+  2. For each post:
+     - Skip if older than 48h
+     - Skip if not music-related (see isMusicLead filter)
+     - Upsert into `leads` table (dedupe by post_id)
+     - If newly inserted: send a Telegram message with two buttons
+  3. Before the first lead of a batch, sends a "NEW BATCH" header message
+  ↓
+Owner reads messages in Telegram → taps "DM on Instagram" → contacts client
+```
+
+## Apify resources (production)
+
+| Resource | ID | Purpose |
+|---|---|---|
+| Threads task | `G02OeSRH3YEldRKrm` | Daily Threads keyword search |
+| Threads schedule | `5w73MqsM6zK9Hnn22` | `0 6 * * *` Africa/Casablanca |
+| Threads webhook | `B22WGiYPuEeCMzjPk` | Fires `ingest-leads?platform=threads` |
+| Instagram task | `2AQ1GZEJweccCbL8O` | **DISABLED** as of 2026-05-31 (owner asked for Threads-only) |
+| Instagram schedule | `L8Y7pX8tXrQdNFpAv` | **DISABLED** |
+| Instagram webhook | `IWEeFXW8cohagYh1h` | **DISABLED** |
+
+Each task has `maxTotalChargeUsd: 0.5` as a hard safety cap. Budget target: ≤$15/month.
+
+## Current keywords (Threads)
+
+Mix of artists looking for help + producers struggling to sell:
+- Artists: `need a music producer`, `looking for beats`, `need a beatmaker`, `need my song mixed`, `need mastering`, `looking for audio engineer`, `need a beat`, `podcast audio editing`
+- Producers: `selling beats`, `how to sell beats`, `no one buys my beats`, `buy my beats`
+
+To change keywords, update the task input via `PUT /v2/actor-tasks/G02OeSRH3YEldRKrm/input`.
+
+## Edge Function filter logic (`isMusicLead`)
+
+Each post must have **at least one MUSIC term AND one SERVICE term**, and zero NEGATIVE terms.
+- MUSIC: beat, beats, beatmaker, producer, rap, rapper, song, track, album, ep, mixtape, vocals, instrumental, indie music, hip hop, trap, r&b, music, recording, studio, etc.
+- SERVICE: producer, mixing, mastering, audio engineer, sound engineer, editing, podcast, collab, etc.
+- NEGATIVE (auto-rejects): video editor, website, logo, graphic design, photographer, wedding, etc.
+
+This stops generic "need a producer" posts about podcasts/film/web from spamming Telegram.
+
+## Common Commands
+
+```bash
+# Expo dev server
+npx expo start --clear
+
+# Deploy Edge Function changes
+SUPABASE_ACCESS_TOKEN=sbp_xxx npx supabase functions deploy ingest-leads \
+  --project-ref hylrkrfmxsnocauibqnt --no-verify-jwt
+
+# Update a Supabase secret
+SUPABASE_ACCESS_TOKEN=sbp_xxx npx supabase secrets set KEY=value \
+  --project-ref hylrkrfmxsnocauibqnt
+
+# Run SQL against the linked Supabase project
+SUPABASE_ACCESS_TOKEN=sbp_xxx npx supabase db query --linked "SELECT ..."
+
+# Trigger Apify task manually
+curl -X POST "https://api.apify.com/v2/actor-tasks/G02OeSRH3YEldRKrm/runs" \
+  -H "Authorization: Bearer apify_api_..." -d '{}'
+
+# Re-export web build for Vercel (when shipping UI changes)
+npx expo export --platform web && cp privacy.html dist/privacy.html
+```
+
+## Telegram bot info
+
+- Bot: **@ProducerLeadsbot** (t.me/ProducerLeadsbot)
+- Chat ID: `7813158930`
+- **Important:** the user must have started a chat with the bot at least once. Otherwise Telegram returns `400 chat not found`.
+- Each lead message has two inline keyboard buttons: `📸 DM on Instagram` (opens `instagram.com/{username}`) and `🧵 View Post` (opens the original Threads post).
+- Batch headers (`━━ NEW BATCH · THREADS ━━`) precede the first new lead of each run so the owner can see where today's batch starts.
 
 ## Gotchas / Known Issues
 
-1. **Directory name "Producer Leads" has a space** — `npx create-expo-app .` fails because of it. Workaround used: create in temp folder `producer-leads`, then move files into `Producer Leads`.
+1. **Directory name has a space** ("Producer Leads"). `npx create-expo-app .` fails on it.
+2. **legacy-peer-deps required** — see `.npmrc`. Don't remove.
+3. **NativeWind v4 babel** — `nativewind/babel` is a **preset**, not a plugin.
+4. **NativeWind v4 needs `react-native-worklets`** installed alongside.
+5. **OAuth on Expo Go vs web** — `sign-in.tsx` branches on `Platform.OS` (legacy from when auth was active).
+6. **Vercel SPA fallback** — use `rewrites[]` in `vercel.json`, NOT `routes[]` (routes intercept JS/CSS).
+7. **Vercel env vars** — `EXPO_PUBLIC_*` vars are baked at build time. Build locally with `npx expo export --platform web`, commit the `dist/` folder, and keep `"buildCommand": ""`.
+8. **`automation-lab/threads-scraper` field names** — uses `searchQueries` (array) + `mode: "search"` + `maxPosts`. NOT `keywords` like the deprecated `futurizerush` actor.
+9. **Threads post timestamps are Unix seconds, not ISO** — multiply by 1000 before `new Date(...)`. The Edge Function uses `item.date` (ISO) preferentially with `item.timestamp` as fallback.
+10. **Telegram bot needs first user contact** — the bot can't message you until you've sent it `/start`.
+11. **Telegram requires UTF-8 with explicit `charset=utf-8`** in Content-Type. Without it, emojis cause `400 Bad Request`.
+12. **Apify webhook payload** is `{ resource: { defaultDatasetId: "..." } }` — the actual posts live in that dataset and must be fetched separately with the Apify token.
+13. **Edge Function `.upsert(..., { ignoreDuplicates: true })`** still returns rows only for newly-inserted records when chained with `.select()`. That's how we avoid re-sending Telegram messages for old leads.
 
-2. **legacy-peer-deps is required** — expo-router 6.x has a strict React peer dep. `.npmrc` already sets `legacy-peer-deps=true`. Don't remove it.
+## Current Status (as of 2026-05-31)
 
-3. **NativeWind v4 babel config** — `nativewind/babel` is a **preset**, NOT a plugin. Wrong:
-   ```js
-   plugins: ['nativewind/babel']   // ❌ ".plugins is not a valid Plugin property"
-   ```
-   Right:
-   ```js
-   presets: [['babel-preset-expo', { jsxImportSource: 'nativewind' }], 'nativewind/babel']
-   ```
+### ✅ Working
+- Apify Threads scraper running daily at 6:00 AM Morocco time
+- Supabase Edge Function `ingest-leads` deployed and tested end-to-end
+- Telegram bot @ProducerLeadsbot delivering leads with inline buttons
+- 48-hour freshness filter + music-relevance filter both active
+- Batch header messages separating daily runs
+- Dedup via `post_id` so the same lead never gets Telegram'd twice
+- Dashboard reads from Supabase (no longer hits Threads API)
+- Hard cost cap of $0.50/run; budget target ≤$15/month
+- Estimated output: ~50–80 leads/day, ~$10–14/month
 
-4. **NativeWind v4 requires `react-native-worklets`** — must be installed alongside nativewind. Caused "Cannot find module 'react-native-worklets/plugin'" error.
+### 🪦 Deprecated / Removed
+- ❌ Threads official API integration — replaced by Apify scraping
+- ❌ Meta business verification — denied, no longer pursued
+- ❌ Meta App Review submission — abandoned with the API pivot
+- ❌ Instagram hashtag scraper — disabled per owner request (Threads-only focus)
+- ❌ Per-category keyword filtering on dashboard — replaced by platform filter
 
-5. **Stale node_modules after moving folders** — if babel errors appear after files were moved or renamed: delete `node_modules` + `package-lock.json`, run `npm install`, restart with `--clear`.
-
-6. **OAuth on Expo Go vs web** — `sign-in.tsx` branches on `Platform.OS`:
-   - Web: standard `signInWithOAuth` with browser redirect
-   - Native: `WebBrowser.openAuthSessionAsync` + manual `setSession` from URL fragment
-   - Requires `expo-auth-session` for `makeRedirectUri`
-
-7. **Threads access token expires every 60 days** — set a reminder. Refresh via Meta Graph API Explorer.
-
-8. **Vercel blank page** — Two causes fixed:
-   - `routes[]` in vercel.json intercepts ALL requests including `/_expo/static/js` and CSS files. Use `rewrites[]` instead — it only applies when no real file exists, so JS/CSS load correctly.
-   - `EXPO_PUBLIC_*` env vars are baked into the bundle at build time. Vercel was rebuilding without them (no `.env` on their server). Fix: build locally with `npx expo export --platform web`, commit the `dist/` folder, and set `"buildCommand": ""` in vercel.json so Vercel just serves the pre-built files.
-   - **When you make code changes:** run `npx expo export --platform web && cp privacy.html dist/privacy.html`, then commit and push.
-
-## Current Status
-
-- ✅ Project skeleton scaffolded, all packages installed
-- ✅ Supabase URL + anon key configured in `.env`
-- ✅ Supabase `users` + `leads` tables created with RLS policies
-- ✅ All screens built and styled (sign-in, onboarding, dashboard, settings)
-- ✅ Code pushed to GitHub: https://github.com/sfooxbeats-boop/Producer-Leads
-- ✅ App runs on Expo Go
-- ✅ **Dev mode active** — auth + onboarding bypassed; app opens straight to dashboard
-- ✅ **Mock leads data** — dashboard shows realistic sample posts when real API returns < 5 posts
-- ✅ **Threads API connected** — keyword search working. Token expires ~July 2026. Renew with `node exchange-code.js`
-- ✅ **View Post fixed** — uses `permalink` from API so button opens the exact post
-- ✅ **Privacy policy page** — lives at `/privacy` in the app + static `privacy.html` at root
-- ✅ **App deployed to Vercel** — live at https://producer-leads.vercel.app (blank page bug fixed — see Gotchas #8)
-- ✅ **Privacy policy URL** — https://producer-leads.vercel.app/privacy (served as static HTML)
-- ✅ **GitHub Pages enabled** — https://sfooxbeats-boop.github.io/Producer-Leads/privacy.html
-- ✅ **App icon** — uploaded to Meta developer dashboard (1024×1024)
-- ✅ **Screencast video** — recorded showing dashboard → filter → Instagram → View Post
-- ✅ **Dev mode banner removed** — dashboard looks clean for Meta reviewers
-- ✅ **loopgem.com domain verified** — confirmed in Meta business verification
-- ✅ **Meta App Review submission filled** — allowed usage descriptions, data handling, reviewer instructions, and platform (website) all completed
-- ✅ **Data processors declared** — Supabase + Vercel listed as IT solutions/cloud providers (United States)
-- ✅ **Reviewer instructions written** — includes URL, no-login walkthrough, and clarification that Facebook Login is NOT used
-- ⏳ **Google OAuth** — not yet configured in Google Cloud Console / Supabase Auth
-- ⏳ **Meta Business Verification** — under review. Auto-entrepreneur registration submitted. Using Sole Proprietorship + loopgem.com domain.
-- ⏳ **Meta App Review** — submission in progress. Waiting for business verification to clear before final submit.
-- ⏳ **Screencast upload** — needs to be uploaded in the Allowed Usage section for both permissions, and in Reviewer Instructions supporting docs
+### ⏳ Future / Optional
+- Re-enable Instagram scraper if Threads volume isn't enough
+- Hook up Google OAuth + onboarding to turn this into a multi-user product
+- Add a "mark as contacted" toggle per lead so the dashboard shows progress
 
 ## Dev Mode (Auth Bypass)
 
-To get the app running on a phone without setting up Google/Threads first, auth was bypassed:
-
-- [app/index.tsx](app/index.tsx) — `<Redirect href="/(app)/dashboard" />`
-- [app/_layout.tsx](app/_layout.tsx) — no auth gate, just renders Stack
-- [app/(app)/dashboard.tsx](app/(app)/dashboard.tsx) — uses hardcoded `DEFAULT_CATEGORIES` instead of Supabase profile
-- [app/(app)/settings.tsx](app/(app)/settings.tsx) — placeholder, no profile editing
-- [lib/threads.ts](lib/threads.ts) — falls back to [lib/mockLeads.ts](lib/mockLeads.ts) when real API returns < 5 posts
-
-**To re-enable auth flow:**
+Still active. To re-enable real auth:
 1. Restore `app/index.tsx` to the session-checking version (see git history)
 2. Restore `app/_layout.tsx` redirect logic
 3. Restore `app/(app)/dashboard.tsx` to fetch user profile from Supabase
-4. Restore `app/(app)/settings.tsx` full version with profile editing
+4. Restore `app/(app)/settings.tsx` full version
 
-## Meta App Review Checklist
+## User Preferences
 
-Required before the app can be used by the public:
-
-- [x] Privacy Policy URL — https://producer-leads.vercel.app/privacy
-- [x] App deployed to Vercel — https://producer-leads.vercel.app
-- [x] App icon uploaded in Meta developer dashboard (1024×1024)
-- [x] Screencast video — recorded (dashboard → filters → Instagram → View Post)
-- [x] App domains — `producer-leads.vercel.app` added in Meta Basic Settings
-- [x] Data deletion URL — filled in Meta Basic Settings
-- [x] Website platform added — `https://producer-leads.vercel.app` in Meta Basic Settings
-- [x] Allowed usage descriptions filled for both `threads_basic` and `threads_keyword_search`
-- [x] Data handling section completed — data processors (Supabase, Vercel), data controller (Soufyane Remdane), country (Morocco)
-- [x] Reviewer instructions written — URL, no-login walkthrough, no Facebook Login clarification
-- [ ] **Business verification** — under review. Auto-entrepreneur submitted. loopgem.com domain verified.
-- [ ] Upload screencast in Allowed Usage section (for both permissions) and in Reviewer Instructions docs
-- [ ] Submit `threads_basic` permission for review (once business verification clears)
-- [ ] Submit `threads_keyword_search` permission for review (once business verification clears)
-
-Meta App ID: `1844958776415693`
-Threads App ID: `2830179424008862`
-
-## User Preferences (from past conversations)
-
-- Update this CLAUDE.md and push to GitHub after every major change to the app.
-- Explain like a beginner — assume zero prior software engineering knowledge.
-- Will deploy as web app first (no App Store), then mobile later.
+- Update this CLAUDE.md and push to GitHub after every major change.
+- Explain like a beginner — assume zero prior engineering knowledge.
+- Web app first, mobile later.
+- Telegram is the primary interface, dashboard is secondary.
 
 ## Useful References
 
-- [SETUP_GUIDE.md](SETUP_GUIDE.md) — owner-facing setup walkthrough
 - Supabase project: https://supabase.com/dashboard/project/hylrkrfmxsnocauibqnt
+- Edge Function logs: https://supabase.com/dashboard/project/hylrkrfmxsnocauibqnt/functions/ingest-leads/logs
+- Apify console: https://console.apify.com/actors/tasks
+- Telegram bot: https://t.me/ProducerLeadsbot
 - GitHub repo: https://github.com/sfooxbeats-boop/Producer-Leads
 - Vercel deployment: https://producer-leads.vercel.app
-- GitHub Pages privacy URL: https://sfooxbeats-boop.github.io/Producer-Leads/privacy.html
-- Threads API docs: https://developers.facebook.com/docs/threads/keyword-search/
-- Morocco auto-entrepreneur registration: https://autoentrepreneur.ma
-- Owner also has domain `loopgem.com` with pro email (needs reactivation) — use for Meta business verification
+- Owner's domain (unused): loopgem.com

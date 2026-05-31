@@ -8,20 +8,17 @@ import {
 } from 'react-native';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'expo-router';
-import { fetchLeadsForCategories, type ThreadsPost } from '../../lib/threads';
-import { CATEGORY_LABELS, type Category } from '../../lib/keywords';
+import { fetchLeadsFromDatabase, type Lead } from '../../lib/threads';
 import LeadCard from '../../components/LeadCard';
 
-// Dev mode default — searches all categories. Will be replaced with user's
-// onboarding answers once auth is wired back up.
-const DEFAULT_CATEGORIES: Category[] = ['producer', 'beatmaker', 'sound_engineer'];
+type PlatformFilter = 'all' | 'threads' | 'instagram';
 
 export default function DashboardScreen() {
   const router = useRouter();
-  const [leads, setLeads] = useState<ThreadsPost[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<string>('all');
+  const [activeFilter, setActiveFilter] = useState<PlatformFilter>('all');
 
   useEffect(() => {
     loadLeads();
@@ -30,7 +27,7 @@ export default function DashboardScreen() {
   async function loadLeads(isRefresh = false) {
     if (!isRefresh) setLoading(true);
     try {
-      const results = await fetchLeadsForCategories(DEFAULT_CATEGORIES);
+      const results = await fetchLeadsFromDatabase();
       setLeads(results);
     } catch (err) {
       console.error('Failed to load leads:', err);
@@ -44,16 +41,15 @@ export default function DashboardScreen() {
     loadLeads(true);
   }, []);
 
-  // Filter leads by category tab
   const filteredLeads = activeFilter === 'all'
     ? leads
-    : leads.filter(lead => {
-        const tagsForCategory = CATEGORY_LABELS[activeFilter as Category];
-        return lead.match_tag.toLowerCase().includes(activeFilter.replace('_', ' '))
-            || (activeFilter === 'producer' && lead.match_tag === 'Production Needed')
-            || (activeFilter === 'beatmaker' && lead.match_tag === 'Beat Request')
-            || (activeFilter === 'sound_engineer' && lead.match_tag === 'Mixing / Mastering Needed');
-      });
+    : leads.filter(lead => lead.platform === activeFilter);
+
+  const filters: { key: PlatformFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'threads', label: '🧵 Threads' },
+    { key: 'instagram', label: '📸 Instagram' },
+  ];
 
   return (
     <View className="flex-1 bg-bg">
@@ -93,20 +89,20 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Filter tabs */}
+        {/* Platform filter tabs */}
         <View className="flex-row gap-2 mt-4">
-          {(['all', 'producer', 'beatmaker', 'sound_engineer'] as const).map(tab => (
+          {filters.map(({ key, label }) => (
             <TouchableOpacity
-              key={tab}
-              onPress={() => setActiveFilter(tab)}
+              key={key}
+              onPress={() => setActiveFilter(key)}
               className={`rounded-full px-4 py-2 ${
-                activeFilter === tab ? 'bg-accent' : 'bg-card border border-border'
+                activeFilter === key ? 'bg-accent' : 'bg-card border border-border'
               }`}
             >
               <Text className={`text-xs font-semibold ${
-                activeFilter === tab ? 'text-white' : 'text-muted'
+                activeFilter === key ? 'text-white' : 'text-muted'
               }`}>
-                {tab === 'all' ? 'All' : CATEGORY_LABELS[tab as Category]}
+                {label}
               </Text>
             </TouchableOpacity>
           ))}
@@ -117,14 +113,14 @@ export default function DashboardScreen() {
       {loading ? (
         <View className="flex-1 items-center justify-center gap-4">
           <ActivityIndicator size="large" color="#8B5CF6" />
-          <Text className="text-muted text-sm">Finding leads on Threads...</Text>
+          <Text className="text-muted text-sm">Loading leads...</Text>
         </View>
       ) : filteredLeads.length === 0 ? (
         <View className="flex-1 items-center justify-center px-8">
           <Text className="text-4xl mb-4">🔍</Text>
-          <Text className="text-white text-lg font-semibold text-center mb-2">No leads in this category</Text>
+          <Text className="text-white text-lg font-semibold text-center mb-2">No leads yet</Text>
           <Text className="text-muted text-sm text-center leading-6">
-            Try a different filter or refresh to look for new posts.
+            Leads will appear here once Apify runs its first daily search. You'll also get them straight to Telegram.
           </Text>
         </View>
       ) : (

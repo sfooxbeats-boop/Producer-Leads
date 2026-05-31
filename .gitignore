@@ -40,3 +40,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Supabase CLI internal cache — never commit
+supabase/.temp/
+supabase/.branches/

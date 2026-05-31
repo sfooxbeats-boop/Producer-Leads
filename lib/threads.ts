@@ -1,5 +1,40 @@
 import { KEYWORDS, MATCH_TAGS } from './keywords';
 import { MOCK_LEADS } from './mockLeads';
+import { supabase } from './supabase';
+
+// Lead from Supabase — populated by the Apify webhook Edge Function
+export type Lead = {
+  id: string;
+  post_id: string;
+  platform: 'threads' | 'instagram';
+  username: string;
+  post_text: string;
+  post_url: string;
+  instagram_url: string;
+  email: string | null;
+  match_tag: string;
+  posted_at: string;
+  fetched_at: string;
+};
+
+export async function fetchLeadsFromDatabase(platform?: 'threads' | 'instagram'): Promise<Lead[]> {
+  let query = supabase
+    .from('leads')
+    .select('*')
+    .order('posted_at', { ascending: false })
+    .limit(100);
+
+  if (platform) {
+    query = query.eq('platform', platform);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('Failed to fetch leads from database:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
 
 const THREADS_BASE = 'https://graph.threads.net/v1.0';
 
