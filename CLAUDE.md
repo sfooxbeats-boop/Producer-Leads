@@ -73,9 +73,14 @@ Edge Function secrets (set via `supabase secrets set`, never in code):
 TELEGRAM_BOT_TOKEN     # Producer Leads bot
 TELEGRAM_CHAT_ID       # Owner's personal chat ID (7813158930)
 APIFY_API_TOKEN        # Used to fetch dataset items from Apify
+GEMINI_API_KEY         # Google AI Studio, free tier — intent analysis + DM writing
 SUPABASE_SERVICE_ROLE_KEY  # Auto-injected by Supabase
 SUPABASE_URL               # Auto-injected by Supabase
 ```
+
+**Supabase personal access tokens expire roughly every 90 days.** When
+`functions deploy` returns `401 Unauthorized`, that is the cause — generate a
+fresh one at supabase.com/dashboard/account/tokens.
 
 ## Database Schema (Supabase)
 
@@ -93,6 +98,9 @@ CREATE TABLE leads (
   instagram_url TEXT NOT NULL,
   email TEXT,                            -- extracted from post text or bio
   match_tag TEXT,
+  verdict TEXT,                          -- BUYER | STRUGGLING_PRODUCER | PROMOTER | IRRELEVANT | UNREVIEWED
+  why TEXT,                              -- short reason from the model
+  dm TEXT,                               -- ready-to-send opener, empty for non-leads
   posted_at TIMESTAMPTZ,
   fetched_at TIMESTAMPTZ DEFAULT now()
 );
@@ -109,14 +117,16 @@ Apify runs `automation-lab/threads-scraper` task with 12 music keywords
   ↓
 On success → webhook hits Supabase Edge Function `ingest-leads`
   ↓
-Edge Function:
-  1. Fetches dataset items from Apify using APIFY_API_TOKEN
-  2. For each post:
-     - Skip if older than 48h
-     - Skip if not music-related (see isMusicLead filter)
-     - Upsert into `leads` table (dedupe by post_id)
-     - If newly inserted: send a Telegram message with two buttons
-  3. Before the first lead of a batch, sends a "NEW BATCH" header message
+Edge Function runs three passes:
+  Pass 1 — cheap filters, so the model only reads posts that could matter:
+     - drop posts older than FRESHNESS_DAYS (7)
+     - drop post_ids already in the DB
+     - drop usernames already seen inside the window
+  Pass 2 — send survivors to Gemini in batches of 10, get back
+     { verdict, why, dm } per post
+  Pass 3 — keep BUYER / STRUGGLING_PRODUCER / UNREVIEWED, drop the rest,
+     upsert, then Telegram each one with its ready-to-copy DM
+  A "NEW BATCH" header is sent before the first lead of a run.
   ↓
 Owner reads messages in Telegram → taps "DM on Instagram" → contacts client
 ```
@@ -136,20 +146,56 @@ Each task has `maxTotalChargeUsd: 0.5` as a hard safety cap. Budget target: ≤$
 
 ## Current keywords (Threads)
 
-Mix of artists looking for help + producers struggling to sell:
-- Artists: `need a music producer`, `looking for beats`, `need a beatmaker`, `need my song mixed`, `need mastering`, `looking for audio engineer`, `need a beat`, `podcast audio editing`
-- Producers: `selling beats`, `how to sell beats`, `no one buys my beats`, `buy my beats`
+Task input also sets `searchSort: "recent"`. **This matters more than the keywords.**
+The actor defaults to `top`, which returns the same relevance-ranked popular posts
+every single day; dedup then correctly skips them and almost nothing new arrives.
+That bug ran unnoticed from May to September 2026 and held delivery to 1–6 leads/day.
 
-To change keywords, update the task input via `PUT /v2/actor-tasks/G02OeSRH3YEldRKrm/input`.
+Current 12 queries:
+`looking for beats`, `need beats`, `beats for sale`, `producer needed`, `need a mix`,
+`mix my song`, `mastering engineer`, `sell my beats`, `type beat`, `need a rapper`,
+`open verse`, `podcast audio editing`
 
-## Edge Function filter logic (`isMusicLead`)
+Only about half of any keyword set returns results — Threads' public search finds
+nothing for longer phrases. Verify coverage after any change:
 
-Each post must have **at least one MUSIC term AND one SERVICE term**, and zero NEGATIVE terms.
-- MUSIC: beat, beats, beatmaker, producer, rap, rapper, song, track, album, ep, mixtape, vocals, instrumental, indie music, hip hop, trap, r&b, music, recording, studio, etc.
-- SERVICE: producer, mixing, mastering, audio engineer, sound engineer, editing, podcast, collab, etc.
-- NEGATIVE (auto-rejects): video editor, website, logo, graphic design, photographer, wedding, etc.
+```bash
+curl -s "https://api.apify.com/v2/datasets/<DATASET_ID>/items?clean=true&format=json&fields=searchQuery" \
+  -H "Authorization: Bearer $APIFY_TOKEN" | grep -o '"searchQuery": "[^"]*"' | sort | uniq -c | sort -rn
+```
 
-This stops generic "need a producer" posts about podcasts/film/web from spamming Telegram.
+To change keywords: `PUT /v2/actor-tasks/G02OeSRH3YEldRKrm/input`.
+
+## Intent analysis (Gemini)
+
+Keyword matching cannot do this job and was replaced on 2026-09-03. It could not tell
+"I need beats" from "check out my beat", so it delivered promoters, competitors
+advertising their own services, and job postings as leads.
+
+The Edge Function now sends each surviving post to **Gemini (free tier)**, which
+returns `{ verdict, why, dm }`.
+
+| Verdict | Meaning | Telegram? |
+|---|---|---|
+| `BUYER` | Wants beats, mixing, mastering, audio/podcast editing | 💰 yes |
+| `STRUGGLING_PRODUCER` | Producer who cannot sell beats — fits the website | 🎹 yes |
+| `PROMOTER` | Advertising their own beats, or hunting artists to place beats with | no |
+| `IRRELEVANT` | Not about music or audio services | no |
+| `UNREVIEWED` | Gemini failed after retries | ⚠️ yes, flagged |
+
+The prompt's core instruction is **direction**: is the poster asking to *receive*
+something (buyer) or offering to *give* something (promoter)? "post your links" and
+"send me your beats" are buyers even though they read like offers.
+
+DM rules baked into the prompt: under 28 words, lowercase, one question, must open
+with "saw", and must never claim an action that has not happened ("sent you",
+"just listened"). An earlier draft hallucinated "sent some samples to your email",
+which is why that ban is explicit.
+
+`analyzeBatch()` re-aligns results on the `i` index the model echoes back, so a
+dropped item cannot shift every later verdict onto the wrong post.
+
+**Cost: $0.** ~10 calls/day against a free tier of 15 RPM and 1M tokens/day.
 
 ## Common Commands
 
@@ -199,31 +245,66 @@ npx expo export --platform web && cp privacy.html dist/privacy.html
 11. **Telegram requires UTF-8 with explicit `charset=utf-8`** in Content-Type. Without it, emojis cause `400 Bad Request`.
 12. **Apify webhook payload** is `{ resource: { defaultDatasetId: "..." } }` — the actual posts live in that dataset and must be fetched separately with the Apify token.
 13. **Edge Function `.upsert(..., { ignoreDuplicates: true })`** still returns rows only for newly-inserted records when chained with `.select()`. That's how we avoid re-sending Telegram messages for old leads.
+14. **`searchSort` defaults to `top`.** For a daily monitor you want `recent`. See the keywords section — this silently capped delivery for three months.
+15. **Threads search returns mostly stale posts.** In a 108-post sample only 2 were inside 48h and 6 inside 7 days. `FRESHNESS_DAYS` in the Edge Function is 7 for that reason. Tightening it back to 2 will drop delivery to near zero.
+16. **`gemini-2.5-flash` is retired for new API keys** (404 "no longer available to new users"). Use `gemini-flash-lite-latest`. List what a key can actually reach with `GET /v1beta/models` before assuming a model name works.
+17. **Gemini keys from AI Studio can start with `AQ.` rather than `AIza`.** Both are valid. They authenticate via the `x-goog-api-key` header or `?key=`, **not** as a `Bearer` token (that returns 401).
+18. **AI Studio needs a Google Cloud project** before it will enable the "Create key" button. Create one free at console.cloud.google.com first; no card required.
+19. **Bash heredocs mangle this file's template literals.** Writing `index.ts` through a `cat <<'EOF'` heredoc fails with "unexpected EOF". Use the Write tool for that file.
 
-## Current Status (as of 2026-05-31)
+## Open-source alternatives (investigated 2026-09-03 — do not redo)
+
+Checked whether free self-hosted scrapers could replace Apify. They cannot, at this scale.
+
+| Project | Finding |
+|---|---|
+| `Zeeshanahmad4/Threads-Scraper` (130★) | **Not real software.** No HTTP request anywhere in the repo, no threads.net URL, `parser.py` only parses data handed to it. README is an advert for a scraping agency (bitbash9@gmail.com). |
+| `instaloader` (13k★) | Genuine and maintained, but Instagram restricts anonymous access, so volume needs a logged-in account and risks a ban on the account the business depends on. |
+| `omkarcloud/website-email-contact-scraper` | 3 stars, no license. Enrichment (emails from known sites), not lead discovery. |
+| `*/All-in-One-Social-Email-Scraper` | Near-identical descriptions across unrelated accounts, two now 404 from the GitHub API. Malware distribution pattern. **Do not install.** |
+
+The code was never the cost. Threads blocks datacenter IPs, so self-hosting still needs
+residential proxies ($8–30/mo) plus a server ($5/mo) plus somebody to repair the scraper
+each time Meta changes their markup. Apify's ~$7/mo buys exactly that. Revisit only above
+a few thousand posts/day.
+
+## Current Status (as of 2026-09-03)
+
+Ran unattended from 2026-05-31 to 2026-09-03: ~95 scheduled runs, zero failures,
+$1.53 of the $5 monthly Apify credit used. It also under-delivered that whole time
+(1–6 leads/day) because of the `searchSort` default, which nobody caught until the
+September audit.
 
 ### ✅ Working
-- Apify Threads scraper running daily at 6:00 AM Morocco time
-- Supabase Edge Function `ingest-leads` deployed and tested end-to-end
-- Telegram bot @ProducerLeadsbot delivering leads with inline buttons
-- 48-hour freshness filter + music-relevance filter both active
-- Batch header messages separating daily runs
-- Dedup via `post_id` so the same lead never gets Telegram'd twice
-- Dashboard reads from Supabase (no longer hits Threads API)
-- Hard cost cap of $0.50/run; budget target ≤$15/month
-- Estimated output: ~50–80 leads/day, ~$10–14/month
+- Apify Threads scraper, daily 6:00 AM Africa/Casablanca, `searchSort: recent`
+- Gemini intent analysis replacing keyword matching, free tier, $0
+- Two lead streams in one Telegram chat: 💰 BUYER and 🎹 PRODUCER LEAD
+- Per-post DM written from that post's actual context, tap-to-copy in Telegram
+- 7-day freshness window, `post_id` dedup, per-username dedup inside the window
+- Batch header before the first lead of each run
+- Retry when Apify fires its webhook before the dataset is committed
+- `maxTotalChargeUsd: 0.5` per run; runs cost $0.17–0.50
+
+### 📊 Honest volume expectation
+Roughly **5–15 leads/day**, not the 50–80 estimated in May. Threads does not have
+that many people asking for beats daily. Measured on a 108-post scrape: 2 posts
+inside 48h, 6 inside 7 days. Raising the number means adding sources, not tuning
+filters. Instagram is the obvious next source and is already built (see below).
 
 ### 🪦 Deprecated / Removed
-- ❌ Threads official API integration — replaced by Apify scraping
-- ❌ Meta business verification — denied, no longer pursued
-- ❌ Meta App Review submission — abandoned with the API pivot
-- ❌ Instagram hashtag scraper — disabled per owner request (Threads-only focus)
-- ❌ Per-category keyword filtering on dashboard — replaced by platform filter
+- ❌ Threads official API — replaced by Apify scraping
+- ❌ Meta business verification / App Review — denied, abandoned
+- ❌ `isMusicLead` keyword filter — replaced by Gemini, delivered junk leads
+- ❌ Template-based DM generator — replaced by Gemini, could not read context
+- ❌ Self-hosted open-source scrapers — investigated and rejected, see above
 
 ### ⏳ Future / Optional
-- Re-enable Instagram scraper if Threads volume isn't enough
-- Hook up Google OAuth + onboarding to turn this into a multi-user product
-- Add a "mark as contacted" toggle per lead so the dashboard shows progress
+- Re-enable the Instagram task (`2AQ1GZEJweccCbL8O`) and its webhook/schedule.
+  Built and working, disabled per owner request on 2026-05-31.
+- Feed reply threads to Gemini as well, not just the root post. Some actors expose
+  reply trees; costs more per run.
+- Surface `verdict` as a dashboard filter so BUYER and PRODUCER LEAD split there too.
+- Add a "mark as contacted" toggle per lead.
 
 ## Dev Mode (Auth Bypass)
 

@@ -44,3 +44,6 @@ yarn-error.*
 # Supabase CLI internal cache — never commit
 supabase/.temp/
 supabase/.branches/
+
+# Local Claude Code settings — records command history, can contain tokens
+.claude/settings.local.json
