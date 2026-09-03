@@ -135,14 +135,50 @@ Owner reads messages in Telegram → taps "DM on Instagram" → contacts client
 
 | Resource | ID | Purpose |
 |---|---|---|
-| Threads task | `G02OeSRH3YEldRKrm` | Daily Threads keyword search |
-| Threads schedule | `5w73MqsM6zK9Hnn22` | `0 6 * * *` Africa/Casablanca |
+| Threads task | `G02OeSRH3YEldRKrm` | Threads keyword search |
+| Threads schedule | `5w73MqsM6zK9Hnn22` | `0 6,14,22 * * *` Africa/Casablanca (every 8h) |
 | Threads webhook | `B22WGiYPuEeCMzjPk` | Fires `ingest-leads?platform=threads` |
 | Instagram task | `2AQ1GZEJweccCbL8O` | **DISABLED** as of 2026-05-31 (owner asked for Threads-only) |
 | Instagram schedule | `L8Y7pX8tXrQdNFpAv` | **DISABLED** |
 | Instagram webhook | `IWEeFXW8cohagYh1h` | **DISABLED** |
 
-Each task has `maxTotalChargeUsd: 0.5` as a hard safety cap. Budget target: ≤$15/month.
+## Staying inside the free tier
+
+**The budget is $5/month, not $15.** The account is on Apify's FREE plan with
+`maxMonthlyUsageUsd: 5` as a hard ceiling. Runs stop when it is reached; there is no
+overage bill. The risk is a lead blackout until the cycle rolls over, never a charge.
+
+The actor bills per event, so cost is predictable:
+
+| Event | Price |
+|---|---|
+| Starting a run | $0.02 |
+| Each post extracted | $0.005 |
+
+`maxTotalChargeUsd: 0.055` on the task turns that into a guarantee:
+**$0.055 × 3 runs/day × 30 days = $4.95.** Changing either the cap or the schedule
+frequency breaks the guarantee — recompute before touching them.
+
+Two mechanisms keep real spend below the cap:
+
+1. **Rolling `postedAfter`** — `advanceTaskCursor()` in the Edge Function moves the
+   cutoff forward after every run (30 min overlap, floored at `FRESHNESS_DAYS`). The
+   actor then stops scrolling at posts it has already seen instead of dragging in weeks
+   of history at $0.005 each. Before this, one run extracted 96 posts and 102 of the 108
+   items were older than a week.
+2. **Keyword rotation** — the same function rotates `searchQueries` by one each run.
+   `maxTotalChargeUsd` aborts a run part-way through the list, so without rotation the
+   last queries would never execute.
+
+Check the burn rate any time:
+
+```bash
+curl -s "https://api.apify.com/v2/users/me/limits" -H "Authorization: Bearer $APIFY_TOKEN"
+```
+
+History: daily runs on `top` sort cost $0.17 and projected $5.27/month, already over.
+Switching to `recent` tripled it to $0.50/run because the run returned 108 posts instead
+of 30. That is what forced the per-run cap.
 
 ## Current keywords (Threads)
 
@@ -151,13 +187,19 @@ The actor defaults to `top`, which returns the same relevance-ranked popular pos
 every single day; dedup then correctly skips them and almost nothing new arrives.
 That bug ran unnoticed from May to September 2026 and held delivery to 1–6 leads/day.
 
-Current 12 queries:
-`looking for beats`, `need beats`, `beats for sale`, `producer needed`, `need a mix`,
-`mix my song`, `mastering engineer`, `sell my beats`, `type beat`, `need a rapper`,
-`open verse`, `podcast audio editing`
+Current 5 queries, all verified to return results:
+`looking for beats`, `need beats`, `type beat`, `beats for sale`, `podcast audio editing`
 
-Only about half of any keyword set returns results — Threads' public search finds
-nothing for longer phrases. Verify coverage after any change:
+`type beat` is kept deliberately. It is promoter-heavy, and those promoters are the
+website's customers.
+
+Roughly half of any candidate keyword set returns nothing — Threads' public search finds
+no results for longer phrases. These were dropped on 2026-09-03 after returning zero on
+every run: `producer needed`, `need a mix`, `mix my song`, `mastering engineer`,
+`sell my beats`, `need a rapper`, `open verse`, and every phrase of the form
+"need a music producer" / "no one buys my beats".
+
+Verify coverage after any change:
 
 ```bash
 curl -s "https://api.apify.com/v2/datasets/<DATASET_ID>/items?clean=true&format=json&fields=searchQuery" \
@@ -177,11 +219,17 @@ returns `{ verdict, why, dm }`.
 
 | Verdict | Meaning | Telegram? |
 |---|---|---|
-| `BUYER` | Wants beats, mixing, mastering, audio/podcast editing | 💰 yes |
-| `STRUGGLING_PRODUCER` | Producer who cannot sell beats — fits the website | 🎹 yes |
-| `PROMOTER` | Advertising their own beats, or hunting artists to place beats with | no |
-| `IRRELEVANT` | Not about music or audio services | no |
+| `BUYER` | Wants to *receive* beats, mixing, mastering, audio/podcast editing | 💰 yes |
+| `PRODUCER` | Makes beats and is trying to sell them — the website's audience | 🎹 yes |
+| `IRRELEVANT` | Competitors touting the same services, job adverts, general chat | no |
 | `UNREVIEWED` | Gemini failed after retries | ⚠️ yes, flagged |
+| `STRUGGLING_PRODUCER` | Legacy, folded into `PRODUCER` on 2026-09-03 | 🎹 yes (old rows) |
+
+**Anyone promoting their own beats is a `PRODUCER`, not a reject.** A #typebeat post is
+someone trying to sell beats, which is exactly who the website serves. Only people who
+*compete* with sfoox (mixing engineers, podcast editors advertising for work) are ruled
+out. The DM branches on this: BUYER gets offered the service they asked for, PRODUCER
+gets asked about their sales and is never offered beats.
 
 The prompt's core instruction is **direction**: is the poster asking to *receive*
 something (buyer) or offering to *give* something (promoter)? "post your links" and
@@ -276,9 +324,10 @@ $1.53 of the $5 monthly Apify credit used. It also under-delivered that whole ti
 September audit.
 
 ### ✅ Working
-- Apify Threads scraper, daily 6:00 AM Africa/Casablanca, `searchSort: recent`
+- Apify Threads scraper every 8h (06:00 / 14:00 / 22:00 Africa/Casablanca), `searchSort: recent`
 - Gemini intent analysis replacing keyword matching, free tier, $0
-- Two lead streams in one Telegram chat: 💰 BUYER and 🎹 PRODUCER LEAD
+- Two lead streams in one Telegram chat: 💰 BUYER and 🎹 WEBSITE LEAD
+- Spend mathematically capped under the $5 free tier (see above)
 - Per-post DM written from that post's actual context, tap-to-copy in Telegram
 - 7-day freshness window, `post_id` dedup, per-username dedup inside the window
 - Batch header before the first lead of each run

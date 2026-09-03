@@ -89,12 +89,25 @@ const SYSTEM_PROMPT = [
   '"prod by me", and #typebeat or #beatstars promo mean the poster wants to GIVE. That is a PROMOTER.',
   '',
   'STEP 2 - Pick exactly one verdict per post:',
-  'BUYER               - wants beats, mixing, mastering, or audio/podcast editing. A real customer.',
-  'STRUGGLING_PRODUCER - a producer struggling to sell beats or find clients. Fits the site.',
-  'PROMOTER            - advertising their own beats or services, or hunting artists to place beats with.',
-  'IRRELEVANT          - not about music or audio services.',
+  'BUYER      - wants to RECEIVE beats, mixing, mastering, or audio/podcast editing.',
+  '             A customer for the services.',
+  'PRODUCER   - makes beats and is trying to sell them. Covers type beat promo posts,',
+  '             "beats for sale", "buy my beats", producers hunting artists to place beats',
+  '             with, and producers openly struggling to sell. All of these are customers',
+  '             for the site that helps producers sell more beats.',
+  'IRRELEVANT - everything else. This includes people touting the SAME services sfoox sells',
+  '             (mixing engineers, mastering engineers, podcast editors advertising for work),',
+  '             job adverts and hiring posts, and general music chat with no request in it.',
   '',
-  'STEP 3 - For BUYER or STRUGGLING_PRODUCER only, write a DM. Otherwise dm is an empty string.',
+  'A promoter posting their own beats is a PRODUCER, not IRRELEVANT. They are trying to sell,',
+  'which is exactly what the site helps with. Only rule out someone who competes with sfoox.',
+  '',
+  'STEP 3 - For BUYER or PRODUCER, write a DM. For IRRELEVANT, dm is an empty string.',
+  'Match the DM to the verdict:',
+  '- BUYER: offer the specific thing they asked for.',
+  '- PRODUCER: never offer to sell them beats, they make their own. Ask about their sales,',
+  '  their release routine, or how the beat is moving. Curiosity, not a pitch.',
+  '',
   'DM rules:',
   '- 1 to 2 sentences, under 28 words',
   '- lowercase, like a text between two people',
@@ -164,7 +177,8 @@ async function analyzeBatch(texts: string[]): Promise<Verdict[]> {
 
 const LABELS: Record<string, string> = {
   BUYER: '💰 <b>BUYER</b>',
-  STRUGGLING_PRODUCER: '🎹 <b>PRODUCER LEAD</b>',
+  PRODUCER: '🎹 <b>WEBSITE LEAD</b>',
+  STRUGGLING_PRODUCER: '🎹 <b>WEBSITE LEAD</b>', // legacy verdict, kept so old rows still render
   UNREVIEWED: '⚠️ <b>UNREVIEWED</b>',
 }
 
@@ -228,6 +242,41 @@ async function fetchDatasetItems(datasetId: string): Promise<any[]> {
   return []
 }
 
+const THREADS_TASK_ID = 'G02OeSRH3YEldRKrm'
+
+// The actor bills $0.005 per post extracted, so most of a run's cost used to go on
+// posts published weeks ago that the freshness filter then binned. Moving postedAfter
+// forward after every run makes each run stop scrolling once it reaches posts it has
+// already seen. The keyword list is rotated at the same time: maxTotalChargeUsd aborts
+// a run mid-way, and without rotation the queries at the end of the list would never
+// get their turn.
+async function advanceTaskCursor(): Promise<string> {
+  try {
+    const base = `https://api.apify.com/v2/actor-tasks/${THREADS_TASK_ID}/input?token=${APIFY_TOKEN}`
+    const cur = await fetch(base)
+    if (!cur.ok) return 'read failed: ' + cur.status
+    const input = await cur.json()
+
+    const q: string[] = Array.isArray(input.searchQueries) ? input.searchQueries : []
+    if (q.length > 1) input.searchQueries = [...q.slice(1), q[0]]
+
+    // 30 minutes of overlap so a post published mid-run is not skipped, and never
+    // reach further back than the freshness window even after a long outage.
+    const overlap = Date.now() - 30 * 60_000
+    const floor = Date.now() - FRESHNESS_DAYS * 24 * 3_600_000
+    input.postedAfter = new Date(Math.max(overlap, floor)).toISOString()
+
+    const put = await fetch(base, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+    return put.ok ? input.postedAfter : 'write failed: ' + put.status
+  } catch (e) {
+    return 'error: ' + String(e).slice(0, 80)
+  }
+}
+
 serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
 
@@ -275,7 +324,7 @@ serve(async (req) => {
   }
 
   // Pass 3 — save and notify only the leads worth contacting.
-  const KEEP = ['BUYER', 'STRUGGLING_PRODUCER', 'UNREVIEWED']
+  const KEEP = ['BUYER', 'PRODUCER', 'STRUGGLING_PRODUCER', 'UNREVIEWED']
   let batchHeaderSent = false
 
   for (const lead of candidates) {
@@ -313,7 +362,9 @@ serve(async (req) => {
     await new Promise(r => setTimeout(r, 350))
   }
 
-  return new Response(JSON.stringify({ ...stats, analyzed: candidates.length, rejectedBy }), {
+  const cursor = platform === 'threads' ? await advanceTaskCursor() : 'n/a'
+
+  return new Response(JSON.stringify({ ...stats, analyzed: candidates.length, rejectedBy, cursor }), {
     headers: { 'Content-Type': 'application/json' },
   })
 })
