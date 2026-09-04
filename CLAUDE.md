@@ -19,7 +19,7 @@ Owner: sfooxbeats (sfooxbeats@gmail.com) — **complete beginner** in app develo
 | Layer | Tool | Notes |
 |-------|------|-------|
 | Lead scraping (cloud) | **Apify** (Actor `automation-lab/threads-scraper`) | 2x/day, pay-per-event, capped by free tier |
-| Lead scraping (local) | **local-scraper/** (Scrapling + real Chrome) | Runs on owner's PC, 3x/day via Task Scheduler, $0 |
+| Lead scraping (local) | **local-scraper/** (Scrapling + real Chrome) | Threads 3x/day + Reddit 2x/day, on owner's PC via Task Scheduler, $0 |
 | Lead ingestion | **Supabase Edge Function** (`ingest-leads`) | Filters by age, dedupes, reads intent via Gemini, fires Telegram |
 | Notifications | **Telegram Bot** (@ProducerLeadsbot) | Inline keyboard buttons for Instagram + post URL |
 | Frontend | Expo (React Native) SDK 54 + Expo Router 6 | Dashboard reads leads from Supabase |
@@ -249,11 +249,20 @@ array (Apify sends `{resource: {defaultDatasetId}}` and the function fetches
 the dataset separately; this script skips that and posts the array directly —
 `ingest-leads` already supports both shapes).
 
-**Current keywords** (6, in `scrape_threads.py`): `need beats`,
+**Current keywords** (9, in `scrape_threads.py`): `need beats`,
 `looking for beats`, `type beat`, `beats for sale`, `podcast audio editing`,
-`need a producer`. A longer list was tried and mostly returned zero — see the
-comment in the script for the dead list. Threads' own search seems to want
-short, literal phrases; don't re-add without testing first.
+`need a producer`, `i need beats`, `send me beats`, `podcast editor needed`.
+A longer list was tried and mostly returned zero — see the comment in the
+script for the dead list. Threads' own search seems to want short, literal
+phrases; don't re-add without testing first.
+
+**Real yield, measured 2026-09-04:** a first run against an empty history
+found 54 unique posts → 24 leads. A second run 35 minutes later against the
+same 6 keywords found 56 posts but only 4 became new leads — the rest were
+already-seen duplicates. Threads doesn't have infinite fresh supply for a
+fixed keyword list; **this is why [Reddit](#reddit-scraper-fourth-lead-source-added-2026-09-04)
+was added as a second local source** rather than just running Threads more
+often.
 
 **Gotcha this uncovered:** `advanceTaskCursor()` in the Edge Function used to
 run for `platform=threads` regardless of caller, so this script was silently
@@ -271,8 +280,84 @@ together.
 
 To run manually: `venv\Scripts\python.exe scrape_threads.py` (all keywords)
 or `... scrape_threads.py "type beat"` (one keyword, for testing).
-Requires the PC to be on; Task Scheduler's `WakeToRun` will wake it from
-sleep but not from a full shutdown.
+
+**PC-on requirement, and a real limitation found here:** these tasks need
+the PC on. `StartWhenAvailable` is set so a missed daily run should fire once
+the PC wakes, and `WakeToRun` covers sleep — but this could not be verified
+end-to-end in testing (a synthetic "missed trigger" simulation was tried and
+was inconclusive, not a clean reproduction of a real missed occurrence).
+**A cleaner fix — a trigger that fires at every login — could not be added**:
+`Register-ScheduledTask`/`Set-ScheduledTask` with an `AtLogOn` trigger
+returned `Access is denied` specifically for that trigger type, in this
+coding environment, even though daily triggers register fine. Likely the
+same category of sandbox restriction that blocked Playwright's bundled
+Chromium from launching (see above). **The owner should add this trigger
+manually** — Task Scheduler → find the task → Triggers tab → New → "At log
+on" — takes under a minute and isn't subject to whatever blocked it here.
+
+**Also found and fixed:** `DisallowStartIfOnBatteries` defaulted to `true`.
+This machine is a laptop, so every run would have silently been skipped
+while unplugged. Fixed via `-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries`
+on `New-ScheduledTaskSettingsSet` — note these are separate parameters from
+`-DisallowStartIfOnBatteries:$false` and `-StopIfGoingOnBatteries:$false`,
+which don't exist as settable switches on that cmdlet.
+
+## Reddit scraper (fourth lead source, added 2026-09-04)
+
+`local-scraper/scrape_reddit.py` — same free, no-login approach as the
+Threads scraper, added because Threads' matching phrases run out fast (see
+above). Runs via Task Scheduler task `ProducerLeads-RedditScraper`, 10:00 and
+18:00 daily — offset from the Threads scraper's 09:00/16:00/21:00 so the two
+don't compete for Chrome at the same time.
+
+**Why two requests per lead:** Reddit's search-results page shows title,
+subreddit, and relative time, but **not the author**. The author only
+appears on the individual post's own page, as the `author` attribute on its
+`<shreddit-post>` custom element. Skipping this would leave every Reddit
+lead with the same blank username, and the Edge Function's per-user dedup
+(`eq('username', ...)`) would then treat the second Reddit lead ever seen as
+a duplicate of the first — so: search page for candidates → filter to fresh
+ones → visit each survivor's own page for its author. `MAX_DETAIL_FETCHES`
+(25) caps how many of these per-post lookups happen in one run.
+
+**Reddit blocks its own `.json` API shortcut now.** The well-known
+`reddit.com/r/.../comments/ID/title.json` trick returns 403 even through the
+same real-Chrome method that works for the normal HTML page — confirmed by
+testing both. Reddit tightened this after their 2023 API pricing changes.
+Plain `curl` to the search endpoint also gets a 403 bot-challenge page; only
+the real-Chrome approach gets through.
+
+**No Instagram equivalent for Reddit leads.** `instagram_url` is sent as
+`''` (satisfies the NOT NULL column) rather than null. The Edge Function
+reads an empty `instagram_url` as a signal to swap the Telegram button to
+"💬 Reply on Reddit", linking `reddit.com/user/<username>` — sfoox has to
+message them from his own logged-in Reddit account; this script never logs
+in anywhere, it only discovers the lead.
+
+**Signal-to-noise:** Reddit's search is fuzzy/semantic, not literal like
+Threads'. A search for "need beats" in r/WeAreTheMusicMakers surfaced real
+leads ("I need a producer") alongside unrelated discussion ("When
+sidechaining Kick and Bass, is there a need to EQ..."). No extra filtering
+needed — the same Gemini BUYER/PRODUCER/IRRELEVANT pass already used for
+Threads handles it; verified 11 of 12 candidates correctly classified in one
+test run.
+
+**Current subreddit/keyword pairs** (8, in `scrape_reddit.py`):
+`makinghiphop` × (`looking for producer`, `need beats`, `need a mix`),
+`trapproduction` × `need beats`, `Beatmakers` × `need beats`,
+`WeAreTheMusicMakers` × `need mixing`, `podcasting` × `need editor`,
+`mixingmastering` × `need help mixing`.
+
+**Instagram itself was tested and ruled out** as a fourth source: hashtag
+pages (`/explore/tags/...`) — the only way to discover posts by topic rather
+than a known username — redirect straight to Instagram's login wall (302 →
+`/accounts/login/`). A plain profile page loads fine, but that's no use for
+lead discovery. Confirmed 2026-09-04; don't re-attempt without a different
+approach (e.g. a logged-in session, which reopens the account-risk problem
+this whole local-scraper approach was built to avoid).
+
+To run manually: `venv\Scripts\python.exe scrape_reddit.py` (all pairs) or
+`... scrape_reddit.py makinghiphop "need beats"` (one pair, for testing).
 
 ## Intent analysis (Gemini)
 

@@ -55,6 +55,9 @@ KEYWORDS = [
     "beats for sale",
     "podcast audio editing",
     "need a producer",
+    "i need beats",
+    "send me beats",
+    "podcast editor needed",
 ]
 # Tried and dropped 2026-09-04 — each returned 0 results on Threads' own search,
 # same behaviour Apify's actor saw with similarly-phrased queries. Threads'
@@ -62,7 +65,11 @@ KEYWORDS = [
 # but don't re-add without checking first — dead queries just add run time.
 #   "need mixing", "need mastering", "selling beats", "no one buys my beats",
 #   "need a beatmaker", "need an audio engineer", "need a beat", "buy my beats",
-#   "looking for a producer", "need mixing engineer", "need a mix"
+#   "looking for a producer", "need mixing engineer", "need a mix",
+#   "i need a beat", "need vocals mixed", "need my track mixed",
+#   "need my song mastered", "looking for an engineer", "beat placement",
+#   "lease beats", "buy beats", "exclusive beats", "need a mixing engineer",
+#   "audio editor needed", "need help mixing", "looking for instrumentals"
 
 FRESHNESS_DAYS = 7  # matches the Edge Function; posts older than this are dropped server-side anyway
 

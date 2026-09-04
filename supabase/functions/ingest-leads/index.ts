@@ -69,13 +69,31 @@ function normalizeInstagram(item: any) {
   }
 }
 
+function normalizeReddit(item: any) {
+  const username = item.username ?? ''
+  const text = [item.title, item.selftext].filter(Boolean).join(' — ')
+  return {
+    post_id: `reddit_${item.id}`,
+    platform: 'reddit',
+    username,
+    post_text: text,
+    post_url: item.url ?? '',
+    // Reddit has no Instagram equivalent; '' satisfies the NOT NULL column and
+    // signals to the Telegram/dashboard layer to link the Reddit profile instead.
+    instagram_url: '',
+    email: extractEmail(text),
+    match_tag: 'Music Lead',
+    posted_at: item.date ?? new Date().toISOString(),
+  }
+}
+
 // ─── Intent analysis ──────────────────────────────────────────────────────────
 // Keyword matching cannot separate "I need beats" from "check out my beat", so
 // every surviving post is read by a model that works out which direction the
 // request runs and writes the opener. Batched to stay inside the free tier.
 
 const SYSTEM_PROMPT = [
-  'You screen Threads posts for sfoox, a music producer and audio engineer who offers',
+  'You screen social media posts (Threads or Reddit) for sfoox, a music producer and audio engineer who offers',
   'beat making, mixing, mastering, podcast and audio editing, and runs a site that helps',
   'producers sell more beats.',
   '',
@@ -194,9 +212,12 @@ const LABELS: Record<string, string> = {
   UNREVIEWED: '⚠️ <b>UNREVIEWED</b>',
 }
 
+const PLATFORM_ICON: Record<string, string> = { threads: '🧵', instagram: '📸', reddit: '🟠' }
+const PLATFORM_LABEL: Record<string, string> = { threads: 'Threads', instagram: 'Instagram', reddit: 'Reddit' }
+
 async function sendTelegram(lead: any): Promise<{ ok: boolean; error?: string }> {
-  const icon = lead.platform === 'threads' ? '🧵' : '📸'
-  const platformLabel = lead.platform === 'threads' ? 'Threads' : 'Instagram'
+  const icon = PLATFORM_ICON[lead.platform] ?? '🌐'
+  const platformLabel = PLATFORM_LABEL[lead.platform] ?? lead.platform
   const snippet = lead.post_text.length > 220
     ? lead.post_text.slice(0, 220) + '…'
     : lead.post_text
@@ -224,7 +245,9 @@ async function sendTelegram(lead: any): Promise<{ ok: boolean; error?: string }>
       parse_mode: 'HTML',
       reply_markup: {
         inline_keyboard: [[
-          { text: '📸 DM on Instagram', url: lead.instagram_url },
+          lead.platform === 'reddit'
+            ? { text: '💬 Reply on Reddit', url: `https://www.reddit.com/user/${lead.username}` }
+            : { text: '📸 DM on Instagram', url: lead.instagram_url },
           { text: `${icon} View Post`, url: lead.post_url },
         ]],
       },
@@ -312,7 +335,9 @@ serve(async (req) => {
   const cutoff = new Date(Date.now() - FRESHNESS_DAYS * 24 * 3_600_000).toISOString()
 
   for (const item of items) {
-    const lead = platform === 'instagram' ? normalizeInstagram(item) : normalizeThreads(item)
+    const lead = platform === 'instagram' ? normalizeInstagram(item)
+      : platform === 'reddit' ? normalizeReddit(item)
+      : normalizeThreads(item)
     if (!lead.username || !lead.post_text) continue
     if (!withinWindow(lead.posted_at)) { stats.stale++; continue }
 
