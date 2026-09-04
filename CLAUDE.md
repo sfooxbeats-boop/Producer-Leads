@@ -10,7 +10,7 @@ The architecture changed on 2026-05-31 — Meta business verification was denied
 
 Two audience types are targeted:
 1. **Artists looking for producers/beats/mixing/mastering** — original audience
-2. **Producers struggling to sell beats** — added 2026-05-31 because the owner's new website helps producers grow beat sales
+2. **Producers selling or struggling to sell beats** — anyone posting their own beats, including #typebeat promo. The owner's website helps producers grow beat sales, so a promoter is a customer, not a reject.
 
 Owner: sfooxbeats (sfooxbeats@gmail.com) — **complete beginner** in app development. Explanations should be plain-language and detailed.
 
@@ -19,7 +19,7 @@ Owner: sfooxbeats (sfooxbeats@gmail.com) — **complete beginner** in app develo
 | Layer | Tool | Notes |
 |-------|------|-------|
 | Lead scraping | **Apify** (Actor `automation-lab/threads-scraper`) | Daily cron, pay-per-event |
-| Lead ingestion | **Supabase Edge Function** (`ingest-leads`) | Filters 48h + music-relevance, dedupes, fires Telegram |
+| Lead ingestion | **Supabase Edge Function** (`ingest-leads`) | Filters by age, dedupes, reads intent via Gemini, fires Telegram |
 | Notifications | **Telegram Bot** (@ProducerLeadsbot) | Inline keyboard buttons for Instagram + post URL |
 | Frontend | Expo (React Native) SDK 54 + Expo Router 6 | Dashboard reads leads from Supabase |
 | Styling | NativeWind v4 + Tailwind CSS 3 | |
@@ -98,7 +98,7 @@ CREATE TABLE leads (
   instagram_url TEXT NOT NULL,
   email TEXT,                            -- extracted from post text or bio
   match_tag TEXT,
-  verdict TEXT,                          -- BUYER | STRUGGLING_PRODUCER | PROMOTER | IRRELEVANT | UNREVIEWED
+  verdict TEXT,                          -- BUYER | PRODUCER | IRRELEVANT | UNREVIEWED
   why TEXT,                              -- short reason from the model
   dm TEXT,                               -- ready-to-send opener, empty for non-leads
   posted_at TIMESTAMPTZ,
@@ -111,9 +111,9 @@ CREATE TABLE leads (
 ## How the daily flow works
 
 ```
-6:00 AM Africa/Casablanca — Apify schedule fires
+06:00 and 18:00 Africa/Casablanca — Apify schedule fires
   ↓
-Apify runs `automation-lab/threads-scraper` task with 12 music keywords
+Apify runs `automation-lab/threads-scraper` task with 5 music keywords
   ↓
 On success → webhook hits Supabase Edge Function `ingest-leads`
   ↓
@@ -124,7 +124,7 @@ Edge Function runs three passes:
      - drop usernames already seen inside the window
   Pass 2 — send survivors to Gemini in batches of 10, get back
      { verdict, why, dm } per post
-  Pass 3 — keep BUYER / STRUGGLING_PRODUCER / UNREVIEWED, drop the rest,
+  Pass 3 — keep BUYER / PRODUCER / UNREVIEWED, drop the rest,
      upsert, then Telegram each one with its ready-to-copy DM
   A "NEW BATCH" header is sent before the first lead of a run.
   ↓
@@ -136,7 +136,7 @@ Owner reads messages in Telegram → taps "DM on Instagram" → contacts client
 | Resource | ID | Purpose |
 |---|---|---|
 | Threads task | `G02OeSRH3YEldRKrm` | Threads keyword search |
-| Threads schedule | `5w73MqsM6zK9Hnn22` | `0 6,14,22 * * *` Africa/Casablanca (every 8h) |
+| Threads schedule | `5w73MqsM6zK9Hnn22` | `0 6,18 * * *` Africa/Casablanca (every 12h) |
 | Threads webhook | `B22WGiYPuEeCMzjPk` | Fires `ingest-leads?platform=threads` |
 | Instagram task | `2AQ1GZEJweccCbL8O` | **DISABLED** as of 2026-05-31 (owner asked for Threads-only) |
 | Instagram schedule | `L8Y7pX8tXrQdNFpAv` | **DISABLED** |
@@ -156,16 +156,22 @@ The actor bills per event, so cost is predictable:
 | Each post extracted | $0.005 |
 
 `maxTotalChargeUsd: 0.055` on the task turns that into a guarantee:
-**$0.055 × 3 runs/day × 30 days = $4.95.** Changing either the cap or the schedule
+**$0.055 × 2 runs/day × 30 days = $3.30.** Changing either the cap or the schedule
 frequency breaks the guarantee — recompute before touching them.
 
 Two mechanisms keep real spend below the cap:
 
-1. **Rolling `postedAfter`** — `advanceTaskCursor()` in the Edge Function moves the
-   cutoff forward after every run (30 min overlap, floored at `FRESHNESS_DAYS`). The
-   actor then stops scrolling at posts it has already seen instead of dragging in weeks
-   of history at $0.005 each. Before this, one run extracted 96 posts and 102 of the 108
-   items were older than a week.
+1. **`postedAfter` set to the freshness window** — `advanceTaskCursor()` rewrites it to
+   `now - FRESHNESS_DAYS` after every run, so the actor stops scrolling once it reaches
+   posts older than a week instead of dragging in years of history at $0.005 each. One
+   run without it extracted 96 posts, of which 102 of the 108 items were over a week old.
+
+   **Do not set `postedAfter` to the polling interval.** Tried on 2026-09-04 (cutoff =
+   last run, 8h earlier) and three consecutive runs scraped **zero** posts: each logged
+   `skippedOutsideDateWindow: 40` and `stoppedByPostedAfter: true`. Threads' search
+   results are not in date order, so the actor meets an old post early and concludes
+   there is nothing newer. `post_id` dedup already prevents repeats — `postedAfter` only
+   has to exclude genuinely stale posts.
 2. **Keyword rotation** — the same function rotates `searchQueries` by one each run.
    `maxTotalChargeUsd` aborts a run part-way through the list, so without rotation the
    last queries would never execute.
@@ -324,7 +330,7 @@ $1.53 of the $5 monthly Apify credit used. It also under-delivered that whole ti
 September audit.
 
 ### ✅ Working
-- Apify Threads scraper every 8h (06:00 / 14:00 / 22:00 Africa/Casablanca), `searchSort: recent`
+- Apify Threads scraper every 12h (06:00 / 18:00 Africa/Casablanca), `searchSort: recent`
 - Gemini intent analysis replacing keyword matching, free tier, $0
 - Two lead streams in one Telegram chat: 💰 BUYER and 🎹 WEBSITE LEAD
 - Spend mathematically capped under the $5 free tier (see above)

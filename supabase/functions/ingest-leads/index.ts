@@ -102,6 +102,11 @@ const SYSTEM_PROMPT = [
   'A promoter posting their own beats is a PRODUCER, not IRRELEVANT. They are trying to sell,',
   'which is exactly what the site helps with. Only rule out someone who competes with sfoox.',
   '',
+  'Watch for the word "beats" meaning the headphone brand rather than music. A post selling',
+  '"Beats Solo", "Beats Studio", "beats buds" or "beats headphones", especially with a price,',
+  'a condition, or a place to collect from, is second hand electronics. Mark it IRRELEVANT.',
+  'A real beat seller talks about type beats, exclusives, leases, placements, or a producer tag.',
+  '',
   'STEP 3 - For BUYER or PRODUCER, write a DM. For IRRELEVANT, dm is an empty string.',
   'Match the DM to the verdict:',
   '- BUYER: offer the specific thing they asked for.',
@@ -260,11 +265,12 @@ async function advanceTaskCursor(): Promise<string> {
     const q: string[] = Array.isArray(input.searchQueries) ? input.searchQueries : []
     if (q.length > 1) input.searchQueries = [...q.slice(1), q[0]]
 
-    // 30 minutes of overlap so a post published mid-run is not skipped, and never
-    // reach further back than the freshness window even after a long outage.
-    const overlap = Date.now() - 30 * 60_000
-    const floor = Date.now() - FRESHNESS_DAYS * 24 * 3_600_000
-    input.postedAfter = new Date(Math.max(overlap, floor)).toISOString()
+    // postedAfter tracks the FRESHNESS WINDOW, not the polling interval. Setting it to
+    // "since the last run" looked right and returned nothing: Threads' search results are
+    // not in date order, so the actor hit an old post early, set stoppedByPostedAfter and
+    // gave up. Three consecutive runs scraped 0 posts having skipped 40 each. Dedup on
+    // post_id already stops repeats, so this only has to exclude genuinely stale posts.
+    input.postedAfter = new Date(Date.now() - FRESHNESS_DAYS * 24 * 3_600_000).toISOString()
 
     const put = await fetch(base, {
       method: 'PUT',
