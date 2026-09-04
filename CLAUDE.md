@@ -18,7 +18,8 @@ Owner: sfooxbeats (sfooxbeats@gmail.com) — **complete beginner** in app develo
 
 | Layer | Tool | Notes |
 |-------|------|-------|
-| Lead scraping | **Apify** (Actor `automation-lab/threads-scraper`) | Daily cron, pay-per-event |
+| Lead scraping (cloud) | **Apify** (Actor `automation-lab/threads-scraper`) | 2x/day, pay-per-event, capped by free tier |
+| Lead scraping (local) | **local-scraper/** (Scrapling + real Chrome) | Runs on owner's PC, 3x/day via Task Scheduler, $0 |
 | Lead ingestion | **Supabase Edge Function** (`ingest-leads`) | Filters by age, dedupes, reads intent via Gemini, fires Telegram |
 | Notifications | **Telegram Bot** (@ProducerLeadsbot) | Inline keyboard buttons for Instagram + post URL |
 | Frontend | Expo (React Native) SDK 54 + Expo Router 6 | Dashboard reads leads from Supabase |
@@ -214,6 +215,65 @@ curl -s "https://api.apify.com/v2/datasets/<DATASET_ID>/items?clean=true&format=
 
 To change keywords: `PUT /v2/actor-tasks/G02OeSRH3YEldRKrm/input`.
 
+## Local scraper (second lead source, added 2026-09-04)
+
+`local-scraper/scrape_threads.py` — a free, self-hosted second source that runs
+on the owner's own PC via Windows Task Scheduler (task
+`ProducerLeads-LocalThreadsScraper`, 09:00 / 16:00 / 21:00 daily, `--WakeToRun`).
+
+**Why it exists:** Apify is capped at ~$0.055/run to stay inside the $5/month
+free tier, which only affords a handful of keywords and posts per run. This
+channel has no per-post cost, so it runs a wider keyword list. Both sources
+post to the same `ingest-leads` Edge Function, which dedupes by `post_id` —
+if Apify and the local scraper both see the same post, only one lead results.
+
+**How it works:** [Scrapling](https://github.com/d4vinci/Scrapling)'s
+`StealthyFetcher`, pointed at the **real installed Chrome**
+(`real_chrome=True`, `executable_path=...`) rather than Playwright's bundled
+Chromium — the bundled binary fails to launch in some environments
+(`spawn UNKNOWN` / "side-by-side configuration incorrect") for reasons
+unrelated to Scrapling itself. Visits `threads.com/search?q=...` pages, no
+login, no cookies, no session. Extracts posts via
+`div[data-pressable-container='true']`, reading the username from the first
+`a[href^='/@']`, the post id/url from `a[href*='/post/']`, and the exact
+timestamp from the `<time datetime="...">` element — this is a proper ISO
+timestamp, not a parsed "2h ago" string.
+
+**Safety:** No login means no account exists to be banned. The only real
+exposure is the home IP being rate-limited by Meta, which is temporary and
+avoided by running a few times a day rather than continuously. Verified
+across ~4 back-to-back runs during testing with zero blocking or CAPTCHAs.
+
+**Sends to:** the same `INGEST_URL` as Apify's webhook, but as a raw JSON
+array (Apify sends `{resource: {defaultDatasetId}}` and the function fetches
+the dataset separately; this script skips that and posts the array directly —
+`ingest-leads` already supports both shapes).
+
+**Current keywords** (6, in `scrape_threads.py`): `need beats`,
+`looking for beats`, `type beat`, `beats for sale`, `podcast audio editing`,
+`need a producer`. A longer list was tried and mostly returned zero — see the
+comment in the script for the dead list. Threads' own search seems to want
+short, literal phrases; don't re-add without testing first.
+
+**Gotcha this uncovered:** `advanceTaskCursor()` in the Edge Function used to
+run for `platform=threads` regardless of caller, so this script was silently
+rewriting Apify's task cursor/keyword rotation on every run. Fixed by gating
+it on `datasetId` being present (i.e. the call genuinely came from Apify's
+webhook, not from this script posting a raw array).
+
+**Also uncovered:** Gemini's retry logic (2 attempts, flat 3s wait) was too
+weak for a big batch — a 56-post run produced 20 `UNREVIEWED` leads from
+rate-limit collisions with concurrent testing. Fixed: 4 attempts with
+exponential backoff (2s/4s/8s), and inter-batch spacing widened from 4.5s to
+6.5s so the pipeline alone stays near 9 calls/minute against Gemini's
+15/minute free-tier ceiling, leaving headroom for both sources landing close
+together.
+
+To run manually: `venv\Scripts\python.exe scrape_threads.py` (all keywords)
+or `... scrape_threads.py "type beat"` (one keyword, for testing).
+Requires the PC to be on; Task Scheduler's `WakeToRun` will wake it from
+sleep but not from a full shutdown.
+
 ## Intent analysis (Gemini)
 
 Keyword matching cannot do this job and was replaced on 2026-09-03. It could not tell
@@ -306,9 +366,12 @@ npx expo export --platform web && cp privacy.html dist/privacy.html
 18. **AI Studio needs a Google Cloud project** before it will enable the "Create key" button. Create one free at console.cloud.google.com first; no card required.
 19. **Bash heredocs mangle this file's template literals.** Writing `index.ts` through a `cat <<'EOF'` heredoc fails with "unexpected EOF". Use the Write tool for that file.
 
-## Open-source alternatives (investigated 2026-09-03 — do not redo)
+## Open-source alternatives (investigated 2026-09-03)
 
-Checked whether free self-hosted scrapers could replace Apify. They cannot, at this scale.
+Checked whether free self-hosted scrapers could **replace** Apify entirely. As an
+always-on server, no — see below. As a **supplement running on the owner's own
+PC**, yes: see [Local scraper](#local-scraper-second-lead-source-added-2026-09-04)
+above, added 2026-09-04.
 
 | Project | Finding |
 |---|---|
@@ -316,11 +379,23 @@ Checked whether free self-hosted scrapers could replace Apify. They cannot, at t
 | `instaloader` (13k★) | Genuine and maintained, but Instagram restricts anonymous access, so volume needs a logged-in account and risks a ban on the account the business depends on. |
 | `omkarcloud/website-email-contact-scraper` | 3 stars, no license. Enrichment (emails from known sites), not lead discovery. |
 | `*/All-in-One-Social-Email-Scraper` | Near-identical descriptions across unrelated accounts, two now 404 from the GitHub API. Malware distribution pattern. **Do not install.** |
+| `ScrapeGraphAI/Scrapegraph-ai` (30k★) | Real, but solves the wrong layer — LLM-based extraction from a page you already fetched. Doesn't get you past Threads' login wall, and would burn the Gemini free tier much faster (one call per page). |
+| `Panniantong/Agent-Reach` (78k★) | Real, but **zero Threads support** — confirmed by grep, not just skimming. Its Instagram path reuses the user's own logged-in desktop Chrome session, the exact account-ban risk instaloader also carries. |
+| `d4vinci/Scrapling` (78k★) | **This is what `local-scraper/` uses.** Genuine, actively maintained, BSD-3. A framework, not a Threads scraper — the Threads-specific logic (selectors, timestamp parsing) had to be written on top of it. |
 
-The code was never the cost. Threads blocks datacenter IPs, so self-hosting still needs
-residential proxies ($8–30/mo) plus a server ($5/mo) plus somebody to repair the scraper
-each time Meta changes their markup. Apify's ~$7/mo buys exactly that. Revisit only above
-a few thousand posts/day.
+**Why the "as a server" conclusion still holds:** Threads blocks datacenter IPs, so
+an always-on server still needs residential proxies ($8–30/mo) plus the server
+itself ($5/mo) plus someone to repair the scraper each time Meta changes their
+markup. Apify's ~$7/mo buys exactly that, so replacing Apify with a hosted
+self-built scraper is still not worth it.
+
+**Why "on the owner's own PC" is different:** a home connection already has a
+residential IP, so the proxy cost disappears. The remaining trade is the PC
+needing to be on when Task Scheduler fires, and owning a scraper that could
+break if Threads changes its markup — accepted as worthwhile for the free
+extra lead volume. Confirmed with `real_chrome=True` pointed at the actual
+installed Chrome; Playwright's own bundled Chromium failed to launch in
+testing (`spawn UNKNOWN`) for reasons unrelated to Scrapling.
 
 ## Current Status (as of 2026-09-03)
 

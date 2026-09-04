@@ -47,3 +47,8 @@ supabase/.branches/
 
 # Local Claude Code settings — records command history, can contain tokens
 .claude/settings.local.json
+
+# Local scraper's Python virtual environment and scratch output — machine-specific
+local-scraper/venv/
+local-scraper/*.json
+local-scraper/__pycache__/

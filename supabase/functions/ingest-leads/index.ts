@@ -139,7 +139,12 @@ const GEMINI_URL =
 async function analyzeBatch(texts: string[]): Promise<Verdict[]> {
   const payload = texts.map((t, i) => ({ i, text: t.slice(0, 900) }))
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // 4 attempts with exponential backoff (2s, 4s, 8s). Gemini's free tier is
+  // 15 requests/minute; a burst of batches from a big scrape (or overlapping
+  // with manual testing against the same key) can trip that, and a single
+  // quick retry is not enough to clear a real rate limit.
+  const MAX_ATTEMPTS = 4
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const res = await fetch(GEMINI_URL, {
         method: 'POST',
@@ -156,7 +161,9 @@ async function analyzeBatch(texts: string[]): Promise<Verdict[]> {
       })
       if (!res.ok) {
         console.error('Gemini HTTP', res.status, (await res.text()).slice(0, 200))
-        await new Promise(r => setTimeout(r, 3000))
+        if (attempt < MAX_ATTEMPTS - 1) {
+          await new Promise(r => setTimeout(r, 2000 * Math.pow(2, attempt)))
+        }
         continue
       }
       const j = await res.json()
@@ -320,13 +327,16 @@ serve(async (req) => {
     candidates.push(lead)
   }
 
-  // Pass 2 — read intent, ten posts per call.
+  // Pass 2 — read intent, ten posts per call. 6.5s between batches keeps this
+  // near 9 calls/minute even alone, leaving headroom under Gemini's 15/minute
+  // free-tier limit for the local scraper and Apify to land close together,
+  // or for manual testing against the same key while a run is in flight.
   const BATCH = 10
   for (let i = 0; i < candidates.length; i += BATCH) {
     const slice = candidates.slice(i, i + BATCH)
     const verdicts = await analyzeBatch(slice.map(l => l.post_text))
     slice.forEach((lead, k) => Object.assign(lead, verdicts[k]))
-    if (i + BATCH < candidates.length) await new Promise(r => setTimeout(r, 4500))
+    if (i + BATCH < candidates.length) await new Promise(r => setTimeout(r, 6500))
   }
 
   // Pass 3 — save and notify only the leads worth contacting.
@@ -368,7 +378,10 @@ serve(async (req) => {
     await new Promise(r => setTimeout(r, 350))
   }
 
-  const cursor = platform === 'threads' ? await advanceTaskCursor() : 'n/a'
+  // Only advance Apify's own cursor/rotation when this call genuinely came from
+  // Apify's webhook (a datasetId is present). Other sources -- like the local
+  // Threads scraper, which also posts platform=threads -- must not touch it.
+  const cursor = (platform === 'threads' && datasetId) ? await advanceTaskCursor() : 'n/a'
 
   return new Response(JSON.stringify({ ...stats, analyzed: candidates.length, rejectedBy, cursor }), {
     headers: { 'Content-Type': 'application/json' },
