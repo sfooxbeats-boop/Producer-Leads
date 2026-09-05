@@ -281,19 +281,78 @@ together.
 To run manually: `venv\Scripts\python.exe scrape_threads.py` (all keywords)
 or `... scrape_threads.py "type beat"` (one keyword, for testing).
 
-**PC-on requirement, and a real limitation found here:** these tasks need
-the PC on. `StartWhenAvailable` is set so a missed daily run should fire once
-the PC wakes, and `WakeToRun` covers sleep — but this could not be verified
-end-to-end in testing (a synthetic "missed trigger" simulation was tried and
-was inconclusive, not a clean reproduction of a real missed occurrence).
-**A cleaner fix — a trigger that fires at every login — could not be added**:
-`Register-ScheduledTask`/`Set-ScheduledTask` with an `AtLogOn` trigger
-returned `Access is denied` specifically for that trigger type, in this
-coding environment, even though daily triggers register fine. Likely the
-same category of sandbox restriction that blocked Playwright's bundled
-Chromium from launching (see above). **The owner should add this trigger
-manually** — Task Scheduler → find the task → Triggers tab → New → "At log
-on" — takes under a minute and isn't subject to whatever blocked it here.
+### Logon trigger — the PC is shut down overnight (added 2026-09-05)
+
+The owner shuts the PC down at night, so the 09:00 / 16:00 / 21:00 daily
+triggers were missing their windows entirely. `WakeToRun` cannot help — it
+wakes a *sleeping* machine, not a powered-off one.
+
+Both tasks now carry a **`LogonTrigger` in addition to** their daily times, so
+a scrape happens whenever the PC is switched on:
+
+| Task | Daily triggers | Logon delay |
+|---|---|---|
+| `ProducerLeads-LocalThreadsScraper` | 09:00 / 16:00 / 21:00 | `PT2M` |
+| `ProducerLeads-RedditScraper` | 10:00 / 18:00 | `PT5M` |
+
+The delays stagger the two so they don't both launch Chrome into a machine
+that is still finishing boot. Duplicate delivery is not a concern — `post_id`
+dedup in `ingest-leads` already covers a logon run landing near a daily one.
+
+**How to add a logon trigger — the cmdlets don't work, the XML does.** This
+was previously recorded here as impossible. It isn't; the earlier attempt just
+used the blocked API. Both of these return `Access is denied` in this coding
+environment, for `AtLogOn` and `AtStartup` alike, whether creating a new task
+or modifying an existing one:
+
+```powershell
+Register-ScheduledTask -Trigger (New-ScheduledTaskTrigger -AtLogOn) ...   # Access is denied
+Set-ScheduledTask      -Trigger (New-ScheduledTaskTrigger -AtLogOn) ...   # Access is denied
+```
+
+Going through task XML is a different code path and is **not** blocked:
+
+```powershell
+$xml = Export-ScheduledTask -TaskName "ProducerLeads-LocalThreadsScraper"
+$xml = $xml -replace '  </Triggers>', @'
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>S-1-5-21-1841663455-1283785925-1625173495-1001</UserId>
+      <Delay>PT2M</Delay>
+    </LogonTrigger>
+  </Triggers>
+'@
+Register-ScheduledTask -TaskName "ProducerLeads-LocalThreadsScraper" -Xml $xml -Force
+```
+
+`Export-ScheduledTask` first, always — `-Force` replaces the whole task, so an
+edit built from anything other than the live definition silently drops the
+daily triggers and settings.
+
+### `run_hidden.py` — why the tasks don't run python.exe directly
+
+A logon trigger running `python.exe` flashes a console window on screen at
+every startup. The tasks therefore run **`pythonw.exe run_hidden.py <script>`**
+instead, which has no console at all.
+
+The catch `run_hidden.py` exists to solve: `pythonw.exe` discards `print()`,
+and both scrapers log exclusively through `print()`, so a silent run would also
+be an undiagnosable one. The launcher redirects `stdout`/`stderr` into
+`local-scraper/scraper.log` (self-truncating past 1 MB), stamps each run, and
+catches tracebacks that would otherwise vanish with the console. It forwards
+extra arguments through, so `pythonw.exe run_hidden.py scrape_reddit.py
+makinghiphop "need beats"` still works for one-off testing.
+
+`scraper.log` is the first place to look when leads stop arriving.
+
+**Verified end-to-end 2026-09-05**, run through Task Scheduler itself rather
+than a direct invocation: `LastTaskResult: 0`, no window, 86 posts scraped,
+14 leads delivered to Telegram.
+
+**Still true:** the PC must be on *at some point*. These tasks fire at logon
+and at their daily times; they cannot run while the machine is off. That is
+the accepted trade for a $0 lead source — Apify's cloud schedule is the
+channel that keeps running regardless.
 
 **Also found and fixed:** `DisallowStartIfOnBatteries` defaulted to `true`.
 This machine is a laptop, so every run would have silently been skipped

@@ -52,3 +52,4 @@ supabase/.branches/
 local-scraper/venv/
 local-scraper/*.json
 local-scraper/__pycache__/
+local-scraper/scraper.log
