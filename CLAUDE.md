@@ -445,10 +445,27 @@ The prompt's core instruction is **direction**: is the poster asking to *receive
 something (buyer) or offering to *give* something (promoter)? "post your links" and
 "send me your beats" are buyers even though they read like offers.
 
-DM rules baked into the prompt: under 28 words, lowercase, one question, must open
-with "saw", and must never claim an action that has not happened ("sent you",
-"just listened"). An earlier draft hallucinated "sent some samples to your email",
-which is why that ban is explicit.
+DM rules baked into the prompt: lowercase, must open with "saw", and must never claim
+an action that has not happened ("sent you", "just listened"). An earlier draft
+hallucinated "sent some samples to your email", which is why that ban is explicit.
+
+**Length and question count differ by verdict** (changed 2026-09-06):
+
+| Verdict | Length | Questions |
+|---|---|---|
+| BUYER | under 28 words | exactly one, about the thing they asked for |
+| PRODUCER | under 40 words | **two** — one about the track, one about sales |
+
+The second PRODUCER question is the point of the whole message. The DM exists to open
+a conversation that leads to loopgem.com (courses and 1-on-1 coaching on selling beats),
+so asking only "how is that beat moving online?" wastes the contact — the prompt now
+calls a music-only DM a *failed* DM and requires the money question:
+
+> saw your escape track. how is that dark trap beat moving online? and the sales side,
+> are you getting paid for your work yet or not?
+
+That example is in the prompt verbatim, with an instruction to vary the wording while
+keeping the two-part shape.
 
 `analyzeBatch()` re-aligns results on the `i` index the model echoes back, so a
 dropped item cannot shift every later verdict onto the wrong post.
